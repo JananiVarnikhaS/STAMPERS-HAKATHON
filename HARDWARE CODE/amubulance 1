@@ -1,0 +1,1776 @@
+/*
+  ============================================================
+              LIFELANE AI
+        A1 / MASTER / AMBULANCE 1
+  ============================================================
+
+  ESP32 Arduino Core 2.0.17
+
+  DEMO ROUTE:
+    HOUSE 1 -> J1 -> J2 -> HOSPITAL 1
+    5 KM
+
+  ACCIDENT:
+    J2 accident before J2 entry
+    -> cancel J2
+    -> reroute 10 KM via J3
+    -> J3 -> HOSPITAL 2
+
+  NORMAL:
+    GREEN 60 seconds
+    YELLOW 10 seconds
+    repeat
+
+  EMERGENCY PREPARATION:
+    J1 = 15 seconds
+    J2 = 25 seconds
+    J3 = 15 seconds
+
+  LCD:
+    LCD1 SDA 26 / SCL 25
+    LCD2 SDA 27 / SCL 33
+    LCD3 SDA 32 / SCL 13
+    Address = 0x27
+
+  ESP-NOW CHANNEL:
+    1
+*/
+
+// ============================================================
+// LIBRARIES
+// ============================================================
+
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// ============================================================
+// MAC ADDRESSES
+// ============================================================
+
+// A1 = 20:9B:A9:67:9A:DC
+
+uint8_t J1_MAC[] = {
+  0x20, 0x9B, 0xA9, 0x67, 0xB2, 0x7C
+};
+
+uint8_t J2_MAC[] = {
+  0xB4, 0xBF, 0xE9, 0x00, 0x60, 0xC4
+};
+
+uint8_t J3_MAC[] = {
+  0xB4, 0xBF, 0xE9, 0x02, 0x07, 0xD0
+};
+
+// ============================================================
+// LCD PINS
+// ============================================================
+
+#define LCD1_SDA 26
+#define LCD1_SCL 25
+
+#define LCD2_SDA 27
+#define LCD2_SCL 33
+
+#define LCD3_SDA 32
+#define LCD3_SCL 13
+
+#define LCD_ADDRESS 0x27
+
+LiquidCrystal_I2C lcd1(
+  LCD_ADDRESS,
+  16,
+  2
+);
+
+LiquidCrystal_I2C lcd2(
+  LCD_ADDRESS,
+  16,
+  2
+);
+
+LiquidCrystal_I2C lcd3(
+  LCD_ADDRESS,
+  16,
+  2
+);
+
+// ============================================================
+// NORMAL TIMINGS
+// ============================================================
+
+const int NORMAL_GREEN_TIME = 60;
+const int NORMAL_YELLOW_TIME = 10;
+
+// ============================================================
+// EMERGENCY PREPARATION TIMES
+// ============================================================
+
+const int J1_PREP_TIME = 15;
+const int J2_PREP_TIME = 25;
+const int J3_PREP_TIME = 15;
+
+// ============================================================
+// EXIT YELLOW
+// ============================================================
+
+const int EXIT_YELLOW_TIME = 2;
+
+// ============================================================
+// MISSION STATE
+// ============================================================
+
+enum MissionState {
+
+  MISSION_IDLE,
+
+  MISSION_J1_ACTIVE,
+
+  MISSION_J2_ACTIVE,
+
+  MISSION_REROUTING,
+
+  MISSION_J3_ACTIVE,
+
+  MISSION_COMPLETED
+};
+
+MissionState missionState =
+  MISSION_IDLE;
+
+// ============================================================
+// LCD STATE
+// ============================================================
+
+enum DisplayState {
+
+  DISPLAY_NORMAL_GREEN,
+
+  DISPLAY_NORMAL_YELLOW,
+
+  DISPLAY_PREPARING,
+
+  DISPLAY_WAITING,
+
+  DISPLAY_AMBULANCE_GREEN,
+
+  DISPLAY_ACCIDENT,
+
+  DISPLAY_COMPLETE
+};
+
+DisplayState j1DisplayState =
+  DISPLAY_NORMAL_GREEN;
+
+DisplayState j2DisplayState =
+  DISPLAY_NORMAL_GREEN;
+
+DisplayState j3DisplayState =
+  DISPLAY_NORMAL_GREEN;
+
+// ============================================================
+// LCD TIMES
+// ============================================================
+
+int j1Time = NORMAL_GREEN_TIME;
+int j2Time = NORMAL_GREEN_TIME;
+int j3Time = NORMAL_GREEN_TIME;
+
+// ============================================================
+// NORMAL CYCLE FLAGS
+// ============================================================
+
+bool j1NormalGreen = true;
+bool j2NormalGreen = true;
+bool j3NormalGreen = true;
+
+// ============================================================
+// NORMAL TIMERS
+// ============================================================
+
+unsigned long j1NormalTimer = 0;
+unsigned long j2NormalTimer = 0;
+unsigned long j3NormalTimer = 0;
+
+// ============================================================
+// PREPARATION TIMERS
+// ============================================================
+
+unsigned long j1PreparationTimer = 0;
+unsigned long j2PreparationTimer = 0;
+unsigned long j3PreparationTimer = 0;
+
+// ============================================================
+// PREPARED FLAGS
+// ============================================================
+
+bool j1Prepared = false;
+bool j2Prepared = false;
+bool j3Prepared = false;
+
+// ============================================================
+// PASS FLAGS
+// ============================================================
+
+bool j1Passed = false;
+bool j2Passed = false;
+bool j3Passed = false;
+
+// ============================================================
+// ACCIDENT
+// ============================================================
+
+bool accidentAtJ2 = false;
+
+// ============================================================
+// LCD REFRESH
+// ============================================================
+
+unsigned long lcdRefreshTimer = 0;
+
+// ============================================================
+// SELECT LCD
+// ============================================================
+
+void selectLCD(
+  uint8_t lcdNumber
+) {
+
+  Wire.end();
+
+  delay(2);
+
+  if (lcdNumber == 1) {
+
+    Wire.begin(
+      LCD1_SDA,
+      LCD1_SCL
+    );
+  }
+
+  else if (lcdNumber == 2) {
+
+    Wire.begin(
+      LCD2_SDA,
+      LCD2_SCL
+    );
+  }
+
+  else {
+
+    Wire.begin(
+      LCD3_SDA,
+      LCD3_SCL
+    );
+  }
+
+  Wire.setClock(100000);
+
+  delay(2);
+}
+
+// ============================================================
+// LCD INITIALIZATION
+// ============================================================
+
+void initializeLCDs() {
+
+  selectLCD(1);
+
+  lcd1.init();
+  lcd1.backlight();
+  lcd1.clear();
+
+  selectLCD(2);
+
+  lcd2.init();
+  lcd2.backlight();
+  lcd2.clear();
+
+  selectLCD(3);
+
+  lcd3.init();
+  lcd3.backlight();
+  lcd3.clear();
+}
+
+// ============================================================
+// LCD 1
+// ============================================================
+
+void displayLCD1(
+  String line1,
+  String line2
+) {
+
+  selectLCD(1);
+
+  lcd1.clear();
+
+  lcd1.setCursor(0, 0);
+  lcd1.print(line1);
+
+  lcd1.setCursor(0, 1);
+  lcd1.print(line2);
+}
+
+// ============================================================
+// LCD 2
+// ============================================================
+
+void displayLCD2(
+  String line1,
+  String line2
+) {
+
+  selectLCD(2);
+
+  lcd2.clear();
+
+  lcd2.setCursor(0, 0);
+  lcd2.print(line1);
+
+  lcd2.setCursor(0, 1);
+  lcd2.print(line2);
+}
+
+// ============================================================
+// LCD 3
+// ============================================================
+
+void displayLCD3(
+  String line1,
+  String line2
+) {
+
+  selectLCD(3);
+
+  lcd3.clear();
+
+  lcd3.setCursor(0, 0);
+  lcd3.print(line1);
+
+  lcd3.setCursor(0, 1);
+  lcd3.print(line2);
+}
+
+// ============================================================
+// ADD ESP-NOW PEER
+// ============================================================
+
+void addPeer(
+  uint8_t *macAddress
+) {
+
+  if (
+    esp_now_is_peer_exist(
+      macAddress
+    )
+  ) {
+
+    return;
+  }
+
+  esp_now_peer_info_t peerInfo = {};
+
+  memcpy(
+    peerInfo.peer_addr,
+    macAddress,
+    6
+  );
+
+  peerInfo.channel = 1;
+
+  peerInfo.encrypt = false;
+
+  esp_err_t result =
+    esp_now_add_peer(
+      &peerInfo
+    );
+
+  if (
+    result == ESP_OK
+  ) {
+
+    Serial.println(
+      "Peer added"
+    );
+  }
+
+  else {
+
+    Serial.print(
+      "Peer add failed: "
+    );
+
+    Serial.println(
+      result
+    );
+  }
+}
+
+// ============================================================
+// SEND MESSAGE
+// ============================================================
+
+void sendMessage(
+  uint8_t *destination,
+  const char *message
+) {
+
+  esp_err_t result =
+    esp_now_send(
+      destination,
+      (uint8_t *)message,
+      strlen(message) + 1
+    );
+
+  Serial.print(
+    "SEND: "
+  );
+
+  Serial.print(
+    message
+  );
+
+  Serial.print(
+    " -> "
+  );
+
+  if (
+    result == ESP_OK
+  ) {
+
+    Serial.println(
+      "OK"
+    );
+  }
+
+  else {
+
+    Serial.println(
+      "FAILED"
+    );
+  }
+}
+
+// ============================================================
+// RESET ALL
+// ============================================================
+
+void resetAllToNormal() {
+
+  missionState =
+    MISSION_IDLE;
+
+  j1DisplayState =
+    DISPLAY_NORMAL_GREEN;
+
+  j2DisplayState =
+    DISPLAY_NORMAL_GREEN;
+
+  j3DisplayState =
+    DISPLAY_NORMAL_GREEN;
+
+  j1NormalGreen = true;
+  j2NormalGreen = true;
+  j3NormalGreen = true;
+
+  j1Time = NORMAL_GREEN_TIME;
+  j2Time = NORMAL_GREEN_TIME;
+  j3Time = NORMAL_GREEN_TIME;
+
+  j1Prepared = false;
+  j2Prepared = false;
+  j3Prepared = false;
+
+  j1Passed = false;
+  j2Passed = false;
+  j3Passed = false;
+
+  accidentAtJ2 = false;
+
+  j1NormalTimer = millis();
+  j2NormalTimer = millis();
+  j3NormalTimer = millis();
+}
+
+// ============================================================
+// NORMAL LCD DISPLAY
+// ============================================================
+
+void updateNormalLCDs() {
+
+  if (
+    missionState != MISSION_IDLE
+  ) {
+
+    return;
+  }
+
+  // ---------------- J1 ----------------
+
+  if (
+    j1NormalGreen
+  ) {
+
+    displayLCD1(
+      "JUNCTION 1",
+      "GREEN: " +
+      String(j1Time)
+    );
+  }
+
+  else {
+
+    displayLCD1(
+      "JUNCTION 1",
+      "YELLOW: " +
+      String(j1Time)
+    );
+  }
+
+  // ---------------- J2 ----------------
+
+  if (
+    j2NormalGreen
+  ) {
+
+    displayLCD2(
+      "JUNCTION 2",
+      "GREEN: " +
+      String(j2Time)
+    );
+  }
+
+  else {
+
+    displayLCD2(
+      "JUNCTION 2",
+      "YELLOW: " +
+      String(j2Time)
+    );
+  }
+
+  // ---------------- J3 ----------------
+
+  if (
+    j3NormalGreen
+  ) {
+
+    displayLCD3(
+      "JUNCTION 3",
+      "GREEN: " +
+      String(j3Time)
+    );
+  }
+
+  else {
+
+    displayLCD3(
+      "JUNCTION 3",
+      "YELLOW: " +
+      String(j3Time)
+    );
+  }
+}
+
+// ============================================================
+// NORMAL J1
+// ============================================================
+
+void runNormalJ1() {
+
+  if (
+    missionState != MISSION_IDLE
+  ) {
+
+    return;
+  }
+
+  if (
+    millis() -
+    j1NormalTimer >=
+    1000
+  ) {
+
+    j1NormalTimer =
+      millis();
+
+    j1Time--;
+
+    if (
+      j1Time < 0
+    ) {
+
+      if (
+        j1NormalGreen
+      ) {
+
+        j1NormalGreen =
+          false;
+
+        j1Time =
+          NORMAL_YELLOW_TIME;
+      }
+
+      else {
+
+        j1NormalGreen =
+          true;
+
+        j1Time =
+          NORMAL_GREEN_TIME;
+      }
+    }
+  }
+}
+
+// ============================================================
+// NORMAL J2
+// ============================================================
+
+void runNormalJ2() {
+
+  if (
+    missionState != MISSION_IDLE
+  ) {
+
+    return;
+  }
+
+  if (
+    millis() -
+    j2NormalTimer >=
+    1000
+  ) {
+
+    j2NormalTimer =
+      millis();
+
+    j2Time--;
+
+    if (
+      j2Time < 0
+    ) {
+
+      if (
+        j2NormalGreen
+      ) {
+
+        j2NormalGreen =
+          false;
+
+        j2Time =
+          NORMAL_YELLOW_TIME;
+      }
+
+      else {
+
+        j2NormalGreen =
+          true;
+
+        j2Time =
+          NORMAL_GREEN_TIME;
+      }
+    }
+  }
+}
+
+// ============================================================
+// NORMAL J3
+// ============================================================
+
+void runNormalJ3() {
+
+  if (
+    missionState != MISSION_IDLE
+  ) {
+
+    return;
+  }
+
+  if (
+    millis() -
+    j3NormalTimer >=
+    1000
+  ) {
+
+    j3NormalTimer =
+      millis();
+
+    j3Time--;
+
+    if (
+      j3Time < 0
+    ) {
+
+      if (
+        j3NormalGreen
+      ) {
+
+        j3NormalGreen =
+          false;
+
+        j3Time =
+          NORMAL_YELLOW_TIME;
+      }
+
+      else {
+
+        j3NormalGreen =
+          true;
+
+        j3Time =
+          NORMAL_GREEN_TIME;
+      }
+    }
+  }
+}
+
+// ============================================================
+// START EMERGENCY
+// ============================================================
+
+void startEmergency(
+  String source
+) {
+
+  if (
+    missionState != MISSION_IDLE
+  ) {
+
+    Serial.println(
+      "Mission already active"
+    );
+
+    return;
+  }
+
+  Serial.println();
+  Serial.println(
+    "================================"
+  );
+  Serial.println(
+    "       EMERGENCY RECEIVED"
+  );
+  Serial.println(
+    "================================"
+  );
+
+  Serial.print(
+    "SOURCE: "
+  );
+
+  Serial.println(
+    source
+  );
+
+  Serial.println(
+    "PATIENT LOCATION: HOUSE 1"
+  );
+
+  Serial.println(
+    "A1 SELECTED"
+  );
+
+  Serial.println(
+    "SHORTEST ROUTE: 5 KM"
+  );
+
+  Serial.println(
+    "HOUSE -> J1 -> J2"
+  );
+
+  Serial.println(
+    "DESTINATION: HOSPITAL 1"
+  );
+
+  // ==========================================================
+  // PREPARE J1
+  // ==========================================================
+
+  sendMessage(
+    J1_MAC,
+    "PREPARE_J1_15"
+  );
+
+  j1Prepared =
+    true;
+
+  j1Time =
+    J1_PREP_TIME;
+
+  j1PreparationTimer =
+    millis();
+
+  j1DisplayState =
+    DISPLAY_PREPARING;
+
+  // ==========================================================
+  // PREPARE J2
+  // ==========================================================
+
+  sendMessage(
+    J2_MAC,
+    "PREPARE_J2_25"
+  );
+
+  j2Prepared =
+    true;
+
+  j2Time =
+    J2_PREP_TIME;
+
+  j2PreparationTimer =
+    millis();
+
+  j2DisplayState =
+    DISPLAY_PREPARING;
+
+  // ==========================================================
+  // J3 REMAINS NORMAL
+  // ==========================================================
+
+  j3DisplayState =
+    DISPLAY_NORMAL_GREEN;
+
+  // ==========================================================
+  // DISPLAY
+  // ==========================================================
+
+  displayLCD1(
+    "JUNCTION 1",
+    "PREP: 15 SEC"
+  );
+
+  displayLCD2(
+    "JUNCTION 2",
+    "PREP: 25 SEC"
+  );
+
+  displayLCD3(
+    "JUNCTION 3",
+    "NORMAL 60 SEC"
+  );
+
+  // ==========================================================
+  // START J1 MISSION
+  // ==========================================================
+
+  missionState =
+    MISSION_J1_ACTIVE;
+}
+
+// ============================================================
+// J1 PREPARATION
+// ============================================================
+
+void updateJ1Preparation() {
+
+  if (
+    !j1Prepared
+  ) {
+
+    return;
+  }
+
+  if (
+    j1DisplayState !=
+    DISPLAY_PREPARING
+  ) {
+
+    return;
+  }
+
+  if (
+    millis() -
+    j1PreparationTimer >=
+    1000
+  ) {
+
+    j1PreparationTimer =
+      millis();
+
+    j1Time--;
+
+    if (
+      j1Time <= 0
+    ) {
+
+      j1Time = 0;
+
+      j1DisplayState =
+        DISPLAY_WAITING;
+
+      displayLCD1(
+        "JUNCTION 1",
+        "WAIT AMBULANCE"
+      );
+
+      Serial.println(
+        "J1 READY"
+      );
+    }
+
+    else {
+
+      displayLCD1(
+        "JUNCTION 1",
+        "PREP: " +
+        String(j1Time)
+      );
+    }
+  }
+}
+
+// ============================================================
+// J2 PREPARATION
+// ============================================================
+
+void updateJ2Preparation() {
+
+  if (
+    !j2Prepared
+  ) {
+
+    return;
+  }
+
+  if (
+    j2DisplayState !=
+    DISPLAY_PREPARING
+  ) {
+
+    return;
+  }
+
+  if (
+    millis() -
+    j2PreparationTimer >=
+    1000
+  ) {
+
+    j2PreparationTimer =
+      millis();
+
+    j2Time--;
+
+    if (
+      j2Time <= 0
+    ) {
+
+      j2Time = 0;
+
+      j2DisplayState =
+        DISPLAY_WAITING;
+
+      displayLCD2(
+        "JUNCTION 2",
+        "WAIT AMBULANCE"
+      );
+
+      Serial.println(
+        "J2 READY"
+      );
+    }
+
+    else {
+
+      displayLCD2(
+        "JUNCTION 2",
+        "PREP: " +
+        String(j2Time)
+      );
+    }
+  }
+}
+
+// ============================================================
+// J3 PREPARATION
+// ============================================================
+
+void updateJ3Preparation() {
+
+  if (
+    !j3Prepared
+  ) {
+
+    return;
+  }
+
+  if (
+    j3DisplayState !=
+    DISPLAY_PREPARING
+  ) {
+
+    return;
+  }
+
+  if (
+    millis() -
+    j3PreparationTimer >=
+    1000
+  ) {
+
+    j3PreparationTimer =
+      millis();
+
+    j3Time--;
+
+    if (
+      j3Time <= 0
+    ) {
+
+      j3Time = 0;
+
+      j3DisplayState =
+        DISPLAY_WAITING;
+
+      displayLCD3(
+        "JUNCTION 3",
+        "WAIT AMBULANCE"
+      );
+
+      Serial.println(
+        "J3 READY"
+      );
+    }
+
+    else {
+
+      displayLCD3(
+        "JUNCTION 3",
+        "PREP: " +
+        String(j3Time)
+      );
+    }
+  }
+}
+
+// ============================================================
+// START REROUTE
+// ============================================================
+
+void startJ3Reroute() {
+
+  Serial.println();
+  Serial.println(
+    "================================"
+  );
+  Serial.println(
+    "        ACCIDENT AT J2"
+  );
+  Serial.println(
+    "================================"
+  );
+
+  Serial.println(
+    "J2 ROUTE BLOCKED"
+  );
+
+  Serial.println(
+    "CANCEL J2"
+  );
+
+  Serial.println(
+    "NEW ROUTE: 10 KM VIA J3"
+  );
+
+  Serial.println(
+    "DESTINATION: HOSPITAL 2"
+  );
+
+  // ==========================================================
+  // MISSION REROUTING
+  // ==========================================================
+
+  missionState =
+    MISSION_REROUTING;
+
+  // ==========================================================
+  // CANCEL J2
+  // ==========================================================
+
+  sendMessage(
+    J2_MAC,
+    "CANCEL_J2"
+  );
+
+  j2Prepared =
+    false;
+
+  j2DisplayState =
+    DISPLAY_ACCIDENT;
+
+  displayLCD2(
+    "JUNCTION 2",
+    "ACCIDENT BLOCKED"
+  );
+
+  // ==========================================================
+  // PREPARE J3
+  // ==========================================================
+
+  sendMessage(
+    J3_MAC,
+    "PREPARE_J3_15"
+  );
+
+  j3Prepared =
+    true;
+
+  j3Time =
+    J3_PREP_TIME;
+
+  j3PreparationTimer =
+    millis();
+
+  j3DisplayState =
+    DISPLAY_PREPARING;
+
+  displayLCD3(
+    "JUNCTION 3",
+    "PREP: 15 SEC"
+  );
+
+  // ==========================================================
+  // J3 ACTIVE
+  // ==========================================================
+
+  missionState =
+    MISSION_J3_ACTIVE;
+}
+
+// ============================================================
+// ESP-NOW RECEIVE CALLBACK
+//
+// ESP32 CORE 2.0.17 FORMAT
+// ============================================================
+
+void OnDataRecv(
+  const uint8_t *mac,
+  const uint8_t *data,
+  int len
+) {
+
+  char message[100];
+
+  int copyLength =
+    len;
+
+  if (
+    copyLength > 99
+  ) {
+
+    copyLength = 99;
+  }
+
+  memcpy(
+    message,
+    data,
+    copyLength
+  );
+
+  message[copyLength] =
+    '\0';
+
+  Serial.print(
+    "RECEIVED: "
+  );
+
+  Serial.println(
+    message
+  );
+
+  // ==========================================================
+  // EMERGENCY FROM J1
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "EMERGENCY_CALL_J1"
+    ) == 0
+  ) {
+
+    startEmergency(
+      "JUNCTION 1"
+    );
+
+    return;
+  }
+
+  // ==========================================================
+  // EMERGENCY FROM J2
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "EMERGENCY_CALL_J2"
+    ) == 0
+  ) {
+
+    startEmergency(
+      "JUNCTION 2"
+    );
+
+    return;
+  }
+
+  // ==========================================================
+  // EMERGENCY FROM J3
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "EMERGENCY_CALL_J3"
+    ) == 0
+  ) {
+
+    startEmergency(
+      "JUNCTION 3"
+    );
+
+    return;
+  }
+
+  // ==========================================================
+  // J1 ENTRY
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "J1_ENTRY"
+    ) == 0
+  ) {
+
+    if (
+      missionState ==
+      MISSION_J1_ACTIVE
+    ) {
+
+      j1DisplayState =
+        DISPLAY_AMBULANCE_GREEN;
+
+      displayLCD1(
+        "JUNCTION 1",
+        "AMBULANCE GREEN"
+      );
+
+      Serial.println(
+        "J1 ENTRY CONFIRMED"
+      );
+
+      Serial.println(
+        "J1 GREEN PRIORITY"
+      );
+    }
+
+    return;
+  }
+
+  // ==========================================================
+  // J1 PASSED
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "J1_PASSED"
+    ) == 0
+  ) {
+
+    if (
+      missionState ==
+      MISSION_J1_ACTIVE
+    ) {
+
+      j1Passed =
+        true;
+
+      j1Prepared =
+        false;
+
+      j1DisplayState =
+        DISPLAY_COMPLETE;
+
+      displayLCD1(
+        "JUNCTION 1",
+        "NORMAL 60 SEC"
+      );
+
+      Serial.println(
+        "J1 PASSED"
+      );
+
+      Serial.println(
+        "AMBULANCE MOVING TO J2"
+      );
+
+      missionState =
+        MISSION_J2_ACTIVE;
+    }
+
+    return;
+  }
+
+  // ==========================================================
+  // J2 ENTRY
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "J2_ENTRY"
+    ) == 0
+  ) {
+
+    if (
+      missionState ==
+      MISSION_J2_ACTIVE &&
+      !accidentAtJ2
+    ) {
+
+      j2DisplayState =
+        DISPLAY_AMBULANCE_GREEN;
+
+      displayLCD2(
+        "JUNCTION 2",
+        "AMBULANCE GREEN"
+      );
+
+      Serial.println(
+        "J2 ENTRY CONFIRMED"
+      );
+
+      Serial.println(
+        "J2 GREEN PRIORITY"
+      );
+    }
+
+    return;
+  }
+
+  // ==========================================================
+  // J2 PASSED
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "J2_PASSED"
+    ) == 0
+  ) {
+
+    if (
+      missionState ==
+      MISSION_J2_ACTIVE &&
+      !accidentAtJ2
+    ) {
+
+      j2Passed =
+        true;
+
+      j2Prepared =
+        false;
+
+      j2DisplayState =
+        DISPLAY_COMPLETE;
+
+      displayLCD2(
+        "JUNCTION 2",
+        "NORMAL 60 SEC"
+      );
+
+      Serial.println();
+      Serial.println(
+        "================================"
+      );
+      Serial.println(
+        "       MISSION COMPLETE"
+      );
+      Serial.println(
+        "         HOSPITAL 1"
+      );
+      Serial.println(
+        "================================"
+      );
+
+      missionState =
+        MISSION_COMPLETED;
+
+      delay(2000);
+
+      resetAllToNormal();
+
+      updateNormalLCDs();
+    }
+
+    return;
+  }
+
+  // ==========================================================
+  // J2 ACCIDENT
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "ACCIDENT_J2"
+    ) == 0
+  ) {
+
+    if (
+      missionState ==
+      MISSION_J2_ACTIVE &&
+      !j2Passed
+    ) {
+
+      accidentAtJ2 =
+        true;
+
+      startJ3Reroute();
+    }
+
+    return;
+  }
+
+  // ==========================================================
+  // J3 ENTRY
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "J3_ENTRY"
+    ) == 0
+  ) {
+
+    if (
+      missionState ==
+      MISSION_J3_ACTIVE
+    ) {
+
+      j3DisplayState =
+        DISPLAY_AMBULANCE_GREEN;
+
+      displayLCD3(
+        "JUNCTION 3",
+        "AMBULANCE GREEN"
+      );
+
+      Serial.println(
+        "J3 ENTRY CONFIRMED"
+      );
+
+      Serial.println(
+        "J3 GREEN PRIORITY"
+      );
+    }
+
+    return;
+  }
+
+  // ==========================================================
+  // J3 PASSED
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "J3_PASSED"
+    ) == 0
+  ) {
+
+    if (
+      missionState ==
+      MISSION_J3_ACTIVE
+    ) {
+
+      j3Passed =
+        true;
+
+      j3Prepared =
+        false;
+
+      j3DisplayState =
+        DISPLAY_COMPLETE;
+
+      displayLCD3(
+        "JUNCTION 3",
+        "NORMAL 60 SEC"
+      );
+
+      Serial.println();
+      Serial.println(
+        "================================"
+      );
+      Serial.println(
+        "       MISSION COMPLETE"
+      );
+      Serial.println(
+        "         HOSPITAL 2"
+      );
+      Serial.println(
+        "================================"
+      );
+
+      missionState =
+        MISSION_COMPLETED;
+
+      delay(2000);
+
+      resetAllToNormal();
+
+      updateNormalLCDs();
+    }
+
+    return;
+  }
+}
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup() {
+
+  Serial.begin(
+    115200
+  );
+
+  delay(1000);
+
+  Serial.println();
+  Serial.println(
+    "================================"
+  );
+  Serial.println(
+    "        LIFELANE AI"
+  );
+  Serial.println(
+    "    A1 / AMBULANCE 1"
+  );
+  Serial.println(
+    "================================"
+  );
+
+  // ==========================================================
+  // WIFI
+  // ==========================================================
+
+  WiFi.mode(
+    WIFI_STA
+  );
+
+  WiFi.disconnect();
+
+  delay(100);
+
+  // ==========================================================
+  // ESP-NOW CHANNEL 1
+  // ==========================================================
+
+  esp_wifi_set_channel(
+    1,
+    WIFI_SECOND_CHAN_NONE
+  );
+
+  Serial.print(
+    "A1 MAC: "
+  );
+
+  Serial.println(
+    WiFi.macAddress()
+  );
+
+  // ==========================================================
+  // ESP-NOW INIT
+  // ==========================================================
+
+  if (
+    esp_now_init() != ESP_OK
+  ) {
+
+    Serial.println(
+      "ESP-NOW INIT FAILED"
+    );
+
+    while (true) {
+
+      delay(1000);
+    }
+  }
+
+  Serial.println(
+    "ESP-NOW INITIALIZED"
+  );
+
+  // ==========================================================
+  // CALLBACK
+  // ==========================================================
+
+  esp_now_register_recv_cb(
+    OnDataRecv
+  );
+
+  // ==========================================================
+  // PEERS
+  // ==========================================================
+
+  addPeer(
+    J1_MAC
+  );
+
+  addPeer(
+    J2_MAC
+  );
+
+  addPeer(
+    J3_MAC
+  );
+
+  // ==========================================================
+  // LCDS
+  // ==========================================================
+
+  initializeLCDs();
+
+  // ==========================================================
+  // RESET
+  // ==========================================================
+
+  resetAllToNormal();
+
+  // ==========================================================
+  // INITIAL LCD
+  // ==========================================================
+
+  updateNormalLCDs();
+
+  Serial.println();
+  Serial.println(
+    "A1 READY"
+  );
+
+  Serial.println(
+    "5 KM ROUTE READY"
+  );
+
+  Serial.println(
+    "10 KM REROUTE VIA J3 READY"
+  );
+
+  Serial.println();
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+
+void loop() {
+
+  // ==========================================================
+  // NORMAL
+  // ==========================================================
+
+  if (
+    missionState ==
+    MISSION_IDLE
+  ) {
+
+    runNormalJ1();
+
+    runNormalJ2();
+
+    runNormalJ3();
+
+    if (
+      millis() -
+      lcdRefreshTimer >=
+      1000
+    ) {
+
+      lcdRefreshTimer =
+        millis();
+
+      updateNormalLCDs();
+    }
+
+    return;
+  }
+
+  // ==========================================================
+  // J1 ACTIVE
+  // ==========================================================
+
+  if (
+    missionState ==
+    MISSION_J1_ACTIVE
+  ) {
+
+    updateJ1Preparation();
+
+    updateJ2Preparation();
+
+    return;
+  }
+
+  // ==========================================================
+  // J2 ACTIVE
+  // ==========================================================
+
+  if (
+    missionState ==
+    MISSION_J2_ACTIVE
+  ) {
+
+    updateJ2Preparation();
+
+    return;
+  }
+
+  // ==========================================================
+  // J3 ACTIVE
+  // ==========================================================
+
+  if (
+    missionState ==
+    MISSION_J3_ACTIVE
+  ) {
+
+    updateJ3Preparation();
+
+    return;
+  }
+
+  // ==========================================================
+  // REROUTING
+  // ==========================================================
+
+  if (
+    missionState ==
+    MISSION_REROUTING
+  ) {
+
+    return;
+  }
+
+  // ==========================================================
+  // COMPLETED
+  // ==========================================================
+
+  if (
+    missionState ==
+    MISSION_COMPLETED
+  ) {
+
+    return;
+  }
+}
