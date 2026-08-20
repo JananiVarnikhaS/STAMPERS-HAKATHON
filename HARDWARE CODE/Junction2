@@ -1,0 +1,371 @@
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
+
+// =====================================================
+// PINS
+// =====================================================
+
+#define RED_LED       15
+#define YELLOW_LED     2
+#define GREEN_LED      4
+
+#define EMERGENCY     19
+#define ACCIDENT      21
+
+#define IR1            5
+#define IR2           18
+
+#define IR_DETECTED LOW
+
+// =====================================================
+// A1 MAC
+// =====================================================
+
+uint8_t A1_MAC[] = {
+  0x20, 0x9B, 0xA9, 0x67, 0x9A, 0xDC
+};
+
+// =====================================================
+// MESSAGE
+// =====================================================
+
+typedef struct {
+  char command[30];
+} Message;
+
+Message txMsg;
+Message rxMsg;
+
+// =====================================================
+// STATE
+// =====================================================
+
+bool corridorActive = false;
+bool ambulanceInside = false;
+
+// =====================================================
+// SIGNAL
+// =====================================================
+
+void redSignal() {
+
+  digitalWrite(RED_LED, HIGH);
+  digitalWrite(YELLOW_LED, LOW);
+  digitalWrite(GREEN_LED, LOW);
+}
+
+void greenSignal() {
+
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(YELLOW_LED, LOW);
+  digitalWrite(GREEN_LED, HIGH);
+}
+
+// =====================================================
+// SEND A1
+// =====================================================
+
+void sendA1(
+  const char *command
+) {
+
+  memset(
+    &txMsg,
+    0,
+    sizeof(txMsg)
+  );
+
+  strcpy(
+    txMsg.command,
+    command
+  );
+
+  esp_err_t result =
+    esp_now_send(
+      A1_MAC,
+      (uint8_t *)&txMsg,
+      sizeof(txMsg)
+    );
+
+  Serial.print("J2 -> A1: ");
+  Serial.print(command);
+  Serial.print(" : ");
+
+  if (result == ESP_OK)
+    Serial.println("SENT");
+  else
+    Serial.println("FAILED");
+}
+
+// =====================================================
+// SEND CALLBACK
+// =====================================================
+
+void OnDataSent(
+  const uint8_t *mac,
+  esp_now_send_status_t status
+) {
+
+  if (
+    status ==
+    ESP_NOW_SEND_SUCCESS
+  )
+    Serial.println("SEND OK");
+  else
+    Serial.println("SEND FAILED");
+}
+
+// =====================================================
+// RECEIVE
+// =====================================================
+
+void OnDataRecv(
+  const uint8_t *mac,
+  const uint8_t *data,
+  int len
+) {
+
+  if (
+    memcmp(
+      mac,
+      A1_MAC,
+      6
+    ) != 0
+  )
+    return;
+
+  if (
+    len != sizeof(Message)
+  )
+    return;
+
+  memcpy(
+    &rxMsg,
+    data,
+    sizeof(rxMsg)
+  );
+
+  Serial.print("A1 -> J2: ");
+  Serial.println(
+    rxMsg.command
+  );
+
+  // ===================================================
+  // PREPARE J2
+  // ===================================================
+
+  if (
+    strcmp(
+      rxMsg.command,
+      "PREPARE_J2"
+    ) == 0
+  ) {
+
+    corridorActive = true;
+    ambulanceInside = false;
+
+    redSignal();
+
+    Serial.println(
+      "J2 READY"
+    );
+  }
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  pinMode(RED_LED, OUTPUT);
+  pinMode(YELLOW_LED, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+
+  pinMode(
+    EMERGENCY,
+    INPUT_PULLUP
+  );
+
+  pinMode(
+    ACCIDENT,
+    INPUT_PULLUP
+  );
+
+  pinMode(
+    IR1,
+    INPUT
+  );
+
+  pinMode(
+    IR2,
+    INPUT
+  );
+
+  redSignal();
+
+  WiFi.mode(WIFI_STA);
+
+  esp_wifi_set_channel(
+    1,
+    WIFI_SECOND_CHAN_NONE
+  );
+
+  delay(500);
+
+  Serial.println();
+  Serial.println("==============================");
+  Serial.println("LIFELANE AI - J2");
+  Serial.println("==============================");
+
+  Serial.print("J2 MAC: ");
+  Serial.println(
+    WiFi.macAddress()
+  );
+
+  if (
+    esp_now_init()
+    != ESP_OK
+  ) {
+
+    Serial.println(
+      "ESP-NOW FAILED"
+    );
+
+    return;
+  }
+
+  esp_now_register_send_cb(
+    OnDataSent
+  );
+
+  esp_now_register_recv_cb(
+    OnDataRecv
+  );
+
+  esp_now_peer_info_t peer = {};
+
+  memcpy(
+    peer.peer_addr,
+    A1_MAC,
+    6
+  );
+
+  peer.channel = 1;
+  peer.encrypt = false;
+
+  if (
+    esp_now_add_peer(&peer)
+    == ESP_OK
+  )
+    Serial.println(
+      "A1 PEER OK"
+    );
+  else
+    Serial.println(
+      "A1 PEER FAILED"
+    );
+
+  Serial.println(
+    "J2 READY"
+  );
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+
+  // ===================================================
+  // ACCIDENT BUTTON
+  // ===================================================
+
+  static bool lastAccident = HIGH;
+
+  bool accident =
+    digitalRead(
+      ACCIDENT
+    );
+
+  if (
+    lastAccident == HIGH &&
+    accident == LOW
+  ) {
+
+    Serial.println();
+    Serial.println("==============================");
+    Serial.println("ACCIDENT AT JUNCTION 2");
+    Serial.println("REROUTING A1");
+    Serial.println("==============================");
+
+    redSignal();
+
+    corridorActive = false;
+    ambulanceInside = false;
+
+    sendA1(
+      "ACCIDENT_J2"
+    );
+
+    delay(500);
+  }
+
+  lastAccident = accident;
+
+  // ===================================================
+  // AMBULANCE ENTRY
+  // ===================================================
+
+  if (
+    corridorActive &&
+    !ambulanceInside &&
+    digitalRead(IR1) == IR_DETECTED
+  ) {
+
+    Serial.println(
+      "A1 ENTERED J2"
+    );
+
+    greenSignal();
+
+    ambulanceInside = true;
+
+    sendA1(
+      "J2_ENTRY"
+    );
+
+    delay(500);
+  }
+
+  // ===================================================
+  // AMBULANCE EXIT
+  // ===================================================
+
+  if (
+    corridorActive &&
+    ambulanceInside &&
+    digitalRead(IR2) == IR_DETECTED
+  ) {
+
+    Serial.println(
+      "A1 EXITED J2"
+    );
+
+    redSignal();
+
+    ambulanceInside = false;
+    corridorActive = false;
+
+    sendA1(
+      "J2_PASSED"
+    );
+
+    delay(500);
+  }
+
+  delay(10);
+}
