@@ -1,0 +1,519 @@
+/*
+  ============================================================
+  LIFELANE AI - JUNCTION 1
+  ============================================================
+
+  GPIO:
+  RED       = 15
+  YELLOW    = 2
+  GREEN     = 4
+  BUZZER    = 23
+  IR1 ENTRY = 5
+  IR2 EXIT  = 18
+  EMERGENCY = 19
+
+  ESP32 CORE 2.0.17
+*/
+
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
+
+// ============================================================
+// PINS
+// ============================================================
+
+#define RED_LED       15
+#define YELLOW_LED     2
+#define GREEN_LED      4
+
+#define BUZZER        23
+
+#define IR_ENTRY       5
+#define IR_EXIT       18
+
+#define EMERGENCY_BTN 19
+
+// ============================================================
+// A1 MAC
+// ============================================================
+
+uint8_t A1_MAC[] = {
+  0x20, 0x9B, 0xA9, 0x67, 0x9A, 0xDC
+};
+
+// ============================================================
+// TIMINGS
+// ============================================================
+
+const int NORMAL_GREEN = 60;
+const int NORMAL_YELLOW = 10;
+
+const int EMERGENCY_YELLOW = 2;
+
+// ============================================================
+// STATES
+// ============================================================
+
+enum State {
+  NORMAL_GREEN_STATE,
+  NORMAL_YELLOW_STATE,
+  PREPARING,
+  WAITING_AMBULANCE,
+  AMBULANCE_INSIDE,
+  EMERGENCY_YELLOW_STATE,
+  CANCELLED
+};
+
+State state = NORMAL_GREEN_STATE;
+
+int countdown = NORMAL_GREEN;
+
+unsigned long timer = 0;
+
+bool emergencyMode = false;
+
+// Sensor previous states
+bool previousEntry = HIGH;
+bool previousExit = HIGH;
+
+// ============================================================
+// BUTTON DEBOUNCE
+// ============================================================
+
+bool lastButtonState = HIGH;
+unsigned long lastButtonTime = 0;
+
+const unsigned long DEBOUNCE_TIME = 250;
+
+// ============================================================
+// SEND MESSAGE
+// ============================================================
+
+void sendMessage(const char *message) {
+
+  esp_err_t result = esp_now_send(
+    A1_MAC,
+    (uint8_t *)message,
+    strlen(message) + 1
+  );
+
+  Serial.print("SEND: ");
+  Serial.print(message);
+
+  if (result == ESP_OK) {
+    Serial.println(" -> OK");
+  } else {
+    Serial.println(" -> FAILED");
+  }
+}
+
+// ============================================================
+// SIGNAL CONTROL
+// ============================================================
+
+void redSignal() {
+
+  digitalWrite(RED_LED, HIGH);
+  digitalWrite(YELLOW_LED, LOW);
+  digitalWrite(GREEN_LED, LOW);
+}
+
+void yellowSignal() {
+
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(YELLOW_LED, HIGH);
+  digitalWrite(GREEN_LED, LOW);
+}
+
+void greenSignal() {
+
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(YELLOW_LED, LOW);
+  digitalWrite(GREEN_LED, HIGH);
+}
+
+// ============================================================
+// NORMAL MODE
+// ============================================================
+
+void normalGreenMode() {
+
+  greenSignal();
+
+  emergencyMode = false;
+
+  state = NORMAL_GREEN_STATE;
+
+  countdown = NORMAL_GREEN;
+
+  timer = millis();
+
+  Serial.println("J1 NORMAL GREEN 60 SEC");
+}
+
+void normalYellowMode() {
+
+  yellowSignal();
+
+  state = NORMAL_YELLOW_STATE;
+
+  countdown = NORMAL_YELLOW;
+
+  timer = millis();
+
+  Serial.println("J1 NORMAL YELLOW 10 SEC");
+}
+
+// ============================================================
+// EMERGENCY PREPARE
+// ============================================================
+
+void prepareEmergency(int preparationTime) {
+
+  emergencyMode = true;
+
+  redSignal();
+
+  digitalWrite(BUZZER, LOW);
+
+  countdown = preparationTime;
+
+  timer = millis();
+
+  state = PREPARING;
+
+  Serial.print("J1 PREPARING: ");
+  Serial.print(preparationTime);
+  Serial.println(" SEC");
+}
+
+// ============================================================
+// RECEIVE CALLBACK
+//
+// ESP32 CORE 2.0.17
+// ============================================================
+
+void OnDataRecv(
+  const uint8_t *mac,
+  const uint8_t *data,
+  int len
+) {
+
+  char message[100];
+
+  int copyLen = min(len, 99);
+
+  memcpy(message, data, copyLen);
+
+  message[copyLen] = '\0';
+
+  Serial.print("RECEIVED: ");
+  Serial.println(message);
+
+  // ========================================================
+  // PREPARE J1
+  // ========================================================
+
+  if (strcmp(message, "PREPARE_J1_15") == 0) {
+
+    prepareEmergency(15);
+
+    return;
+  }
+
+  // ========================================================
+  // CANCEL J1
+  // ========================================================
+
+  if (strcmp(message, "CANCEL_J1") == 0) {
+
+    emergencyMode = false;
+
+    redSignal();
+
+    digitalWrite(BUZZER, LOW);
+
+    normalGreenMode();
+
+    return;
+  }
+}
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  pinMode(RED_LED, OUTPUT);
+  pinMode(YELLOW_LED, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+
+  pinMode(BUZZER, OUTPUT);
+
+  pinMode(IR_ENTRY, INPUT_PULLUP);
+  pinMode(IR_EXIT, INPUT_PULLUP);
+
+  pinMode(EMERGENCY_BTN, INPUT_PULLUP);
+
+  digitalWrite(BUZZER, LOW);
+
+  WiFi.mode(WIFI_STA);
+
+  WiFi.disconnect();
+
+  esp_wifi_set_channel(
+    1,
+    WIFI_SECOND_CHAN_NONE
+  );
+
+  Serial.println("J1 MAC:");
+  Serial.println(WiFi.macAddress());
+
+  if (esp_now_init() != ESP_OK) {
+
+    Serial.println("ESP-NOW INIT FAILED");
+
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  esp_now_register_recv_cb(OnDataRecv);
+
+  // Add A1 as peer
+  if (!esp_now_is_peer_exist(A1_MAC)) {
+
+    esp_now_peer_info_t peerInfo = {};
+
+    memcpy(
+      peerInfo.peer_addr,
+      A1_MAC,
+      6
+    );
+
+    peerInfo.channel = 1;
+    peerInfo.encrypt = false;
+
+    esp_now_add_peer(&peerInfo);
+  }
+
+  normalGreenMode();
+
+  Serial.println("JUNCTION 1 READY");
+}
+
+// ============================================================
+// NORMAL TIMER
+// ============================================================
+
+void runNormalMode() {
+
+  if (millis() - timer < 1000) {
+    return;
+  }
+
+  timer = millis();
+
+  countdown--;
+
+  if (countdown < 0) {
+
+    if (state == NORMAL_GREEN_STATE) {
+
+      normalYellowMode();
+
+    } else {
+
+      normalGreenMode();
+    }
+  }
+}
+
+// ============================================================
+// EMERGENCY PREPARATION TIMER
+// ============================================================
+
+void runPreparation() {
+
+  if (millis() - timer < 1000) {
+    return;
+  }
+
+  timer = millis();
+
+  countdown--;
+
+  Serial.print("J1 PREP: ");
+  Serial.println(countdown);
+
+  if (countdown <= 0) {
+
+    countdown = 0;
+
+    redSignal();
+
+    state = WAITING_AMBULANCE;
+
+    Serial.println("J1 READY - WAITING FOR AMBULANCE");
+  }
+}
+
+// ============================================================
+// CHECK AMBULANCE ENTRY
+// ============================================================
+
+void checkEntry() {
+
+  if (
+    state != WAITING_AMBULANCE
+  ) {
+    return;
+  }
+
+  bool currentEntry = digitalRead(IR_ENTRY);
+
+  if (
+    previousEntry == HIGH &&
+    currentEntry == LOW
+  ) {
+
+    Serial.println("====================");
+    Serial.println("J1 AMBULANCE ENTRY");
+    Serial.println("====================");
+
+    state = AMBULANCE_INSIDE;
+
+    greenSignal();
+
+    digitalWrite(BUZZER, HIGH);
+
+    sendMessage("J1_ENTRY");
+  }
+
+  previousEntry = currentEntry;
+}
+
+// ============================================================
+// CHECK AMBULANCE EXIT
+// ============================================================
+
+void checkExit() {
+
+  if (
+    state != AMBULANCE_INSIDE
+  ) {
+    return;
+  }
+
+  bool currentExit = digitalRead(IR_EXIT);
+
+  if (
+    previousExit == HIGH &&
+    currentExit == LOW
+  ) {
+
+    Serial.println("====================");
+    Serial.println("J1 AMBULANCE EXIT");
+    Serial.println("====================");
+
+    digitalWrite(BUZZER, LOW);
+
+    yellowSignal();
+
+    state = EMERGENCY_YELLOW_STATE;
+
+    countdown = EMERGENCY_YELLOW;
+
+    timer = millis();
+
+    sendMessage("J1_PASSED");
+  }
+
+  previousExit = currentExit;
+}
+
+// ============================================================
+// EMERGENCY YELLOW AFTER EXIT
+// ============================================================
+
+void runEmergencyYellow() {
+
+  if (millis() - timer < 1000) {
+    return;
+  }
+
+  timer = millis();
+
+  countdown--;
+
+  if (countdown <= 0) {
+
+    normalGreenMode();
+  }
+}
+
+// ============================================================
+// EMERGENCY BUTTON
+// ============================================================
+
+void checkEmergencyButton() {
+
+  bool currentButton = digitalRead(EMERGENCY_BTN);
+
+  if (
+    currentButton == LOW &&
+    lastButtonState == HIGH &&
+    millis() - lastButtonTime > DEBOUNCE_TIME
+  ) {
+
+    lastButtonTime = millis();
+
+    Serial.println("==============================");
+    Serial.println("J1 EMERGENCY BUTTON PRESSED");
+    Serial.println("==============================");
+
+    sendMessage("EMERGENCY_CALL_J1");
+  }
+
+  lastButtonState = currentButton;
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+
+void loop() {
+
+  checkEmergencyButton();
+
+  if (!emergencyMode) {
+
+    runNormalMode();
+
+    return;
+  }
+
+  if (state == PREPARING) {
+
+    runPreparation();
+
+  }
+  else if (state == WAITING_AMBULANCE) {
+
+    checkEntry();
+
+  }
+  else if (state == AMBULANCE_INSIDE) {
+
+    checkExit();
+
+  }
+  else if (state == EMERGENCY_YELLOW_STATE) {
+
+    runEmergencyYellow();
+  }
+}
