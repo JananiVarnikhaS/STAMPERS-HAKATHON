@@ -1,0 +1,1278 @@
+/*
+============================================================
+              LIFELANE AI
+                 JUNCTION 3
+============================================================
+
+J3 FINAL PIN CONFIGURATION
+
+RED LED        = GPIO15
+YELLOW LED     = GPIO2
+GREEN LED      = GPIO4
+
+BUZZER         = GPIO23
+
+IR ENTRY       = GPIO18
+IR EXIT        = GPIO19
+
+EMERGENCY BTN  = GPIO5
+
+============================================================
+
+IR LOGIC
+
+IR = 1 -> nothing detected
+IR = 0 -> ambulance/object detected
+
+============================================================
+
+NORMAL
+
+GREEN 60 seconds
+YELLOW 10 seconds
+repeat
+
+============================================================
+
+EMERGENCY
+
+A1 sends:
+
+PREPARE_J3_15
+
+J3:
+RED
+15 second preparation
+
+Then:
+
+IR1 / GPIO18 detects ambulance
+        ↓
+GREEN + BUZZER
+        ↓
+IR2 / GPIO19 detects ambulance
+        ↓
+YELLOW
+        ↓
+J3_PASSED sent to A1
+        ↓
+NORMAL GREEN 60
+
+============================================================
+*/
+
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
+
+// ============================================================
+// GPIO
+// ============================================================
+
+#define RED_LED        15
+#define YELLOW_LED      2
+#define GREEN_LED       4
+
+#define BUZZER         23
+
+#define IR_ENTRY       18
+#define IR_EXIT        19
+
+#define EMERGENCY_BTN   5
+
+// ============================================================
+// A1 MAC
+// ============================================================
+
+uint8_t A1_MAC[] = {
+  0x20,
+  0x9B,
+  0xA9,
+  0x67,
+  0x9A,
+  0xDC
+};
+
+// ============================================================
+// TIMINGS
+// ============================================================
+
+const int NORMAL_GREEN_TIME  = 60;
+const int NORMAL_YELLOW_TIME = 10;
+
+const int J3_PREP_TIME = 15;
+
+const int EXIT_YELLOW_TIME = 2;
+
+// ============================================================
+// STATES
+// ============================================================
+
+enum J3State {
+
+  NORMAL_GREEN,
+
+  NORMAL_YELLOW,
+
+  PREPARING,
+
+  WAITING_FOR_AMBULANCE,
+
+  AMBULANCE_INSIDE,
+
+  EXIT_YELLOW
+};
+
+J3State currentState =
+  NORMAL_GREEN;
+
+// ============================================================
+// TIMER
+// ============================================================
+
+int countdown =
+  NORMAL_GREEN_TIME;
+
+unsigned long stateTimer = 0;
+
+// ============================================================
+// EMERGENCY MODE
+// ============================================================
+
+bool emergencyMode = false;
+
+// ============================================================
+// IR FLAGS
+// ============================================================
+
+bool entryDetected = false;
+
+bool exitDetected = false;
+
+// ============================================================
+// IR DEBOUNCE
+// ============================================================
+
+unsigned long entryLowSince = 0;
+
+unsigned long exitLowSince = 0;
+
+const unsigned long IR_CONFIRM_TIME = 150;
+
+// ============================================================
+// BUTTON
+// ============================================================
+
+int lastButtonState = HIGH;
+
+unsigned long lastButtonTime = 0;
+
+const unsigned long BUTTON_DEBOUNCE = 300;
+
+// ============================================================
+// SIGNAL FUNCTIONS
+// ============================================================
+
+void redSignal() {
+
+  digitalWrite(
+    RED_LED,
+    HIGH
+  );
+
+  digitalWrite(
+    YELLOW_LED,
+    LOW
+  );
+
+  digitalWrite(
+    GREEN_LED,
+    LOW
+  );
+}
+
+// ============================================================
+
+void yellowSignal() {
+
+  digitalWrite(
+    RED_LED,
+    LOW
+  );
+
+  digitalWrite(
+    YELLOW_LED,
+    HIGH
+  );
+
+  digitalWrite(
+    GREEN_LED,
+    LOW
+  );
+}
+
+// ============================================================
+
+void greenSignal() {
+
+  digitalWrite(
+    RED_LED,
+    LOW
+  );
+
+  digitalWrite(
+    YELLOW_LED,
+    LOW
+  );
+
+  digitalWrite(
+    GREEN_LED,
+    HIGH
+  );
+}
+
+// ============================================================
+// SEND TO A1
+// ============================================================
+
+void sendToA1(
+  const char *message
+) {
+
+  esp_err_t result =
+    esp_now_send(
+      A1_MAC,
+      (uint8_t *)message,
+      strlen(message) + 1
+    );
+
+  Serial.print(
+    "SEND TO A1: "
+  );
+
+  Serial.print(
+    message
+  );
+
+  Serial.print(
+    " -> "
+  );
+
+  if (
+    result == ESP_OK
+  ) {
+
+    Serial.println(
+      "SUCCESS"
+    );
+
+  } else {
+
+    Serial.print(
+      "FAILED CODE="
+    );
+
+    Serial.println(
+      result
+    );
+  }
+}
+
+// ============================================================
+// RESET IR FLAGS
+// ============================================================
+
+void resetIRFlags() {
+
+  entryDetected = false;
+
+  exitDetected = false;
+
+  entryLowSince = 0;
+
+  exitLowSince = 0;
+}
+
+// ============================================================
+// START J3 EMERGENCY PREPARATION
+// ============================================================
+
+void startJ3Preparation() {
+
+  Serial.println();
+  Serial.println(
+    "========================================"
+  );
+
+  Serial.println(
+    "       J3 EMERGENCY PREPARATION"
+  );
+
+  Serial.println(
+    "========================================"
+  );
+
+  emergencyMode = true;
+
+  resetIRFlags();
+
+  // ----------------------------------------------------------
+  // J3 becomes RED while preparing
+  // ----------------------------------------------------------
+
+  redSignal();
+
+  digitalWrite(
+    BUZZER,
+    LOW
+  );
+
+  countdown =
+    J3_PREP_TIME;
+
+  stateTimer =
+    millis();
+
+  currentState =
+    PREPARING;
+
+  Serial.println(
+    "J3 SIGNAL = RED"
+  );
+
+  Serial.println(
+    "PREPARATION = 15 SECONDS"
+  );
+}
+
+// ============================================================
+// CANCEL J3
+// ============================================================
+
+void cancelJ3() {
+
+  Serial.println();
+  Serial.println(
+    "J3 EMERGENCY CANCELLED"
+  );
+
+  emergencyMode =
+    false;
+
+  digitalWrite(
+    BUZZER,
+    LOW
+  );
+
+  resetIRFlags();
+
+  greenSignal();
+
+  countdown =
+    NORMAL_GREEN_TIME;
+
+  stateTimer =
+    millis();
+
+  currentState =
+    NORMAL_GREEN;
+}
+
+// ============================================================
+// ESP-NOW RECEIVE
+// ============================================================
+
+void OnDataRecv(
+  const uint8_t *mac,
+  const uint8_t *data,
+  int len
+) {
+
+  char message[100];
+
+  int copyLength =
+    len;
+
+  if (
+    copyLength > 99
+  ) {
+
+    copyLength = 99;
+  }
+
+  memcpy(
+    message,
+    data,
+    copyLength
+  );
+
+  message[copyLength] =
+    '\0';
+
+  Serial.println();
+  Serial.print(
+    "RECEIVED FROM A1: "
+  );
+
+  Serial.println(
+    message
+  );
+
+  // ==========================================================
+  // PREPARE J3
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "PREPARE_J3_15"
+    ) == 0
+  ) {
+
+    startJ3Preparation();
+
+    return;
+  }
+
+  // ==========================================================
+  // CANCEL J3
+  // ==========================================================
+
+  if (
+    strcmp(
+      message,
+      "CANCEL_J3"
+    ) == 0
+  ) {
+
+    cancelJ3();
+
+    return;
+  }
+}
+
+// ============================================================
+// PREPARATION COUNTDOWN
+// ============================================================
+
+void runPreparation() {
+
+  if (
+    millis() -
+    stateTimer <
+    1000
+  ) {
+
+    return;
+  }
+
+  stateTimer =
+    millis();
+
+  countdown--;
+
+  Serial.print(
+    "J3 PREPARING: "
+  );
+
+  Serial.println(
+    countdown
+  );
+
+  if (
+    countdown <= 0
+  ) {
+
+    countdown = 0;
+
+    redSignal();
+
+    currentState =
+      WAITING_FOR_AMBULANCE;
+
+    Serial.println();
+    Serial.println(
+      "========================================"
+    );
+
+    Serial.println(
+      "J3 READY"
+    );
+
+    Serial.println(
+      "WAITING FOR AMBULANCE"
+    );
+
+    Serial.println(
+      "IR1 ENTRY = GPIO18"
+    );
+
+    Serial.println(
+      "========================================"
+    );
+  }
+}
+
+// ============================================================
+// CHECK IR ENTRY
+// ============================================================
+
+void checkEntryIR() {
+
+  if (
+    currentState !=
+    WAITING_FOR_AMBULANCE
+  ) {
+
+    return;
+  }
+
+  int irValue =
+    digitalRead(
+      IR_ENTRY
+    );
+
+  // ----------------------------------------------------------
+  // Print only when the IR state changes
+  // ----------------------------------------------------------
+
+  static int previousIR =
+    HIGH;
+
+  if (
+    irValue != previousIR
+  ) {
+
+    Serial.print(
+      "J3 IR1 GPIO18 = "
+    );
+
+    Serial.println(
+      irValue
+    );
+
+    previousIR =
+      irValue;
+  }
+
+  // ==========================================================
+  // LOW = DETECTED
+  // ==========================================================
+
+  if (
+    irValue == LOW &&
+    !entryDetected
+  ) {
+
+    if (
+      entryLowSince == 0
+    ) {
+
+      entryLowSince =
+        millis();
+    }
+
+    if (
+      millis() -
+      entryLowSince >=
+      IR_CONFIRM_TIME
+    ) {
+
+      entryDetected =
+        true;
+
+      entryLowSince =
+        0;
+
+      Serial.println();
+      Serial.println(
+        "========================================"
+      );
+
+      Serial.println(
+        "      AMBULANCE ENTERED J3"
+      );
+
+      Serial.println(
+        "      IR1 GPIO18 = 0"
+      );
+
+      Serial.println(
+        "========================================"
+      );
+
+      // ------------------------------------------------------
+      // GREEN
+      // ------------------------------------------------------
+
+      greenSignal();
+
+      digitalWrite(
+        BUZZER,
+        HIGH
+      );
+
+      currentState =
+        AMBULANCE_INSIDE;
+
+      Serial.println(
+        "J3 SIGNAL = GREEN"
+      );
+
+      Serial.println(
+        "BUZZER = ON"
+      );
+
+      // ------------------------------------------------------
+      // INFORM A1
+      // ------------------------------------------------------
+
+      sendToA1(
+        "J3_ENTRY"
+      );
+    }
+
+  } else {
+
+    if (
+      irValue == HIGH
+    ) {
+
+      entryLowSince =
+        0;
+    }
+  }
+}
+
+// ============================================================
+// CHECK IR EXIT
+// ============================================================
+
+void checkExitIR() {
+
+  if (
+    currentState !=
+    AMBULANCE_INSIDE
+  ) {
+
+    return;
+  }
+
+  int irValue =
+    digitalRead(
+      IR_EXIT
+    );
+
+  // ----------------------------------------------------------
+  // Print only when state changes
+  // ----------------------------------------------------------
+
+  static int previousIR =
+    HIGH;
+
+  if (
+    irValue != previousIR
+  ) {
+
+    Serial.print(
+      "J3 IR2 GPIO19 = "
+    );
+
+    Serial.println(
+      irValue
+    );
+
+    previousIR =
+      irValue;
+  }
+
+  // ==========================================================
+  // LOW = DETECTED
+  // ==========================================================
+
+  if (
+    irValue == LOW &&
+    !exitDetected
+  ) {
+
+    if (
+      exitLowSince == 0
+    ) {
+
+      exitLowSince =
+        millis();
+    }
+
+    if (
+      millis() -
+      exitLowSince >=
+      IR_CONFIRM_TIME
+    ) {
+
+      exitDetected =
+        true;
+
+      exitLowSince =
+        0;
+
+      Serial.println();
+      Serial.println(
+        "========================================"
+      );
+
+      Serial.println(
+        "      AMBULANCE EXITED J3"
+      );
+
+      Serial.println(
+        "      IR2 GPIO19 = 0"
+      );
+
+      Serial.println(
+        "========================================"
+      );
+
+      // ------------------------------------------------------
+      // BUZZER OFF
+      // ------------------------------------------------------
+
+      digitalWrite(
+        BUZZER,
+        LOW
+      );
+
+      // ------------------------------------------------------
+      // GREEN -> YELLOW
+      // ------------------------------------------------------
+
+      yellowSignal();
+
+      currentState =
+        EXIT_YELLOW;
+
+      countdown =
+        EXIT_YELLOW_TIME;
+
+      stateTimer =
+        millis();
+
+      Serial.println(
+        "J3 SIGNAL = YELLOW"
+      );
+
+      Serial.println(
+        "BUZZER = OFF"
+      );
+
+      // ------------------------------------------------------
+      // INFORM A1
+      // ------------------------------------------------------
+
+      sendToA1(
+        "J3_PASSED"
+      );
+    }
+
+  } else {
+
+    if (
+      irValue == HIGH
+    ) {
+
+      exitLowSince =
+        0;
+    }
+  }
+}
+
+// ============================================================
+// EXIT YELLOW
+// ============================================================
+
+void runExitYellow() {
+
+  if (
+    millis() -
+    stateTimer <
+    1000
+  ) {
+
+    return;
+  }
+
+  stateTimer =
+    millis();
+
+  countdown--;
+
+  if (
+    countdown <= 0
+  ) {
+
+    Serial.println(
+      "J3 RETURNING TO NORMAL"
+    );
+
+    emergencyMode =
+      false;
+
+    resetIRFlags();
+
+    greenSignal();
+
+    countdown =
+      NORMAL_GREEN_TIME;
+
+    currentState =
+      NORMAL_GREEN;
+  }
+}
+
+// ============================================================
+// NORMAL SIGNAL CYCLE
+// ============================================================
+
+void runNormalCycle() {
+
+  if (
+    millis() -
+    stateTimer <
+    1000
+  ) {
+
+    return;
+  }
+
+  stateTimer =
+    millis();
+
+  countdown--;
+
+  if (
+    countdown < 0
+  ) {
+
+    // ========================================================
+    // GREEN -> YELLOW
+    // ========================================================
+
+    if (
+      currentState ==
+      NORMAL_GREEN
+    ) {
+
+      yellowSignal();
+
+      countdown =
+        NORMAL_YELLOW_TIME;
+
+      currentState =
+        NORMAL_YELLOW;
+
+      Serial.println(
+        "J3 NORMAL -> YELLOW 10"
+      );
+    }
+
+    // ========================================================
+    // YELLOW -> GREEN
+    // ========================================================
+
+    else {
+
+      greenSignal();
+
+      countdown =
+        NORMAL_GREEN_TIME;
+
+      currentState =
+        NORMAL_GREEN;
+
+      Serial.println(
+        "J3 NORMAL -> GREEN 60"
+      );
+    }
+  }
+}
+
+// ============================================================
+// EMERGENCY BUTTON
+// ============================================================
+
+void checkEmergencyButton() {
+
+  int buttonState =
+    digitalRead(
+      EMERGENCY_BTN
+    );
+
+  if (
+    buttonState == LOW &&
+    lastButtonState == HIGH
+  ) {
+
+    if (
+      millis() -
+      lastButtonTime >=
+      BUTTON_DEBOUNCE
+    ) {
+
+      lastButtonTime =
+        millis();
+
+      Serial.println();
+      Serial.println(
+        "========================================"
+      );
+
+      Serial.println(
+        "       J3 EMERGENCY BUTTON"
+      );
+
+      Serial.println(
+        "========================================"
+      );
+
+      sendToA1(
+        "EMERGENCY_CALL_J3"
+      );
+    }
+  }
+
+  lastButtonState =
+    buttonState;
+}
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup() {
+
+  Serial.begin(
+    115200
+  );
+
+  delay(1000);
+
+  Serial.println();
+  Serial.println(
+    "========================================"
+  );
+
+  Serial.println(
+    "         LIFELANE AI"
+  );
+
+  Serial.println(
+    "         JUNCTION 3"
+  );
+
+  Serial.println(
+    "========================================"
+  );
+
+  // ==========================================================
+  // GPIO OUTPUTS
+  // ==========================================================
+
+  pinMode(
+    RED_LED,
+    OUTPUT
+  );
+
+  pinMode(
+    YELLOW_LED,
+    OUTPUT
+  );
+
+  pinMode(
+    GREEN_LED,
+    OUTPUT
+  );
+
+  pinMode(
+    BUZZER,
+    OUTPUT
+  );
+
+  // ==========================================================
+  // IR INPUTS
+  //
+  // IMPORTANT:
+  // Your test showed 00 when hand is detected.
+  // Therefore LOW = detected.
+  //
+  // INPUT is used here because the IR module provides
+  // its own output signal.
+  // ==========================================================
+
+  pinMode(
+    IR_ENTRY,
+    INPUT
+  );
+
+  pinMode(
+    IR_EXIT,
+    INPUT
+  );
+
+  // ==========================================================
+  // BUTTON
+  // ==========================================================
+
+  pinMode(
+    EMERGENCY_BTN,
+    INPUT_PULLUP
+  );
+
+  // ==========================================================
+  // INITIAL SIGNAL
+  // ==========================================================
+
+  digitalWrite(
+    BUZZER,
+    LOW
+  );
+
+  greenSignal();
+
+  // ==========================================================
+  // WIFI
+  // ==========================================================
+
+  WiFi.mode(
+    WIFI_STA
+  );
+
+  WiFi.disconnect();
+
+  delay(100);
+
+  // ==========================================================
+  // ESP-NOW CHANNEL 1
+  // ==========================================================
+
+  esp_wifi_set_channel(
+    1,
+    WIFI_SECOND_CHAN_NONE
+  );
+
+  Serial.print(
+    "J3 MAC ADDRESS: "
+  );
+
+  Serial.println(
+    WiFi.macAddress()
+  );
+
+  // ==========================================================
+  // ESP-NOW INITIALIZATION
+  // ==========================================================
+
+  if (
+    esp_now_init() != ESP_OK
+  ) {
+
+    Serial.println(
+      "ESP-NOW INITIALIZATION FAILED"
+    );
+
+    while (true) {
+
+      delay(1000);
+    }
+  }
+
+  Serial.println(
+    "ESP-NOW INITIALIZED"
+  );
+
+  // ==========================================================
+  // RECEIVE CALLBACK
+  // ==========================================================
+
+  esp_now_register_recv_cb(
+    OnDataRecv
+  );
+
+  // ==========================================================
+  // ADD A1
+  // ==========================================================
+
+  if (
+    !esp_now_is_peer_exist(
+      A1_MAC
+    )
+  ) {
+
+    esp_now_peer_info_t peerInfo =
+      {};
+
+    memcpy(
+      peerInfo.peer_addr,
+      A1_MAC,
+      6
+    );
+
+    peerInfo.channel =
+      1;
+
+    peerInfo.encrypt =
+      false;
+
+    esp_err_t result =
+      esp_now_add_peer(
+        &peerInfo
+      );
+
+    if (
+      result == ESP_OK
+    ) {
+
+      Serial.println(
+        "A1 PEER ADDED"
+      );
+
+    } else {
+
+      Serial.print(
+        "A1 PEER ERROR: "
+      );
+
+      Serial.println(
+        result
+      );
+    }
+  }
+
+  // ==========================================================
+  // INITIAL STATE
+  // ==========================================================
+
+  currentState =
+    NORMAL_GREEN;
+
+  countdown =
+    NORMAL_GREEN_TIME;
+
+  stateTimer =
+    millis();
+
+  resetIRFlags();
+
+  Serial.println();
+  Serial.println(
+    "========================================"
+  );
+
+  Serial.println(
+    "J3 READY"
+  );
+
+  Serial.println(
+    "IR1 ENTRY = GPIO18"
+  );
+
+  Serial.println(
+    "IR2 EXIT  = GPIO19"
+  );
+
+  Serial.println(
+    "IR DETECTED = 0"
+  );
+
+  Serial.println(
+    "NORMAL GREEN = 60"
+  );
+
+  Serial.println(
+    "NORMAL YELLOW = 10"
+  );
+
+  Serial.println(
+    "========================================"
+  );
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+
+void loop() {
+
+  // ==========================================================
+  // BUTTON ALWAYS ACTIVE
+  // ==========================================================
+
+  checkEmergencyButton();
+
+  // ==========================================================
+  // NORMAL
+  // ==========================================================
+
+  if (
+    !emergencyMode
+  ) {
+
+    runNormalCycle();
+
+    return;
+  }
+
+  // ==========================================================
+  // PREPARATION
+  // ==========================================================
+
+  if (
+    currentState ==
+    PREPARING
+  ) {
+
+    runPreparation();
+
+    return;
+  }
+
+  // ==========================================================
+  // WAITING FOR AMBULANCE
+  // ==========================================================
+
+  if (
+    currentState ==
+    WAITING_FOR_AMBULANCE
+  ) {
+
+    checkEntryIR();
+
+    return;
+  }
+
+  // ==========================================================
+  // AMBULANCE INSIDE
+  // ==========================================================
+
+  if (
+    currentState ==
+    AMBULANCE_INSIDE
+  ) {
+
+    checkExitIR();
+
+    return;
+  }
+
+  // ==========================================================
+  // EXIT YELLOW
+  // ==========================================================
+
+  if (
+    currentState ==
+    EXIT_YELLOW
+  ) {
+
+    runExitYellow();
+
+    return;
+  }
+}
