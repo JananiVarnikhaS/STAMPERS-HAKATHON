@@ -1,0 +1,924 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+
+void main() {
+  runApp(const LifeLaneAI());
+}
+
+class LifeLaneAI extends StatelessWidget {
+  const LifeLaneAI({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'LifeLane AI',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.red,
+      ),
+      home: const AmbulanceDriverApp(),
+    );
+  }
+}
+
+class AmbulanceDriverApp extends StatefulWidget {
+  const AmbulanceDriverApp({super.key});
+
+  @override
+  State<AmbulanceDriverApp> createState() =>
+      _AmbulanceDriverAppState();
+}
+
+class _AmbulanceDriverAppState
+    extends State<AmbulanceDriverApp> {
+
+  bool emergencyActive = false;
+  bool greenCorridor = false;
+  bool incidentDetected = false;
+  bool locationLoading = false;
+
+  String selectedHospital = 'City General Hospital';
+  String selectedRoute = 'Primary Route';
+  String trafficStatus = 'Moderate';
+
+  int eta = 12;
+  double? latitude;
+  double? longitude;
+
+  Timer? etaTimer;
+
+  final List<String> hospitals = [
+    'City General Hospital',
+    'Apollo Hospital',
+    'Government Medical Hospital',
+    'Emergency Trauma Center',
+  ];
+
+  @override
+  void dispose() {
+    etaTimer?.cancel();
+    super.dispose();
+  }
+
+  // ------------------------------------------------------------
+  // GET GPS LOCATION
+  // ------------------------------------------------------------
+
+  Future<void> getCurrentLocation() async {
+    setState(() {
+      locationLoading = true;
+    });
+
+    try {
+      bool serviceEnabled =
+          await Geolocator.isLocationServiceEnabled();
+
+      if (!serviceEnabled) {
+        showMessage(
+          'Please enable GPS/location services.',
+        );
+
+        setState(() {
+          locationLoading = false;
+        });
+
+        return;
+      }
+
+      LocationPermission permission =
+          await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission =
+            await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission ==
+              LocationPermission.deniedForever) {
+        showMessage(
+          'Location permission is required.',
+        );
+
+        setState(() {
+          locationLoading = false;
+        });
+
+        return;
+      }
+
+      Position position =
+          await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      setState(() {
+        latitude = position.latitude;
+        longitude = position.longitude;
+        locationLoading = false;
+      });
+
+      showMessage(
+        'GPS location updated successfully.',
+      );
+    } catch (e) {
+      setState(() {
+        locationLoading = false;
+      });
+
+      showMessage(
+        'Unable to get location.',
+      );
+    }
+  }
+
+  // ------------------------------------------------------------
+  // START EMERGENCY
+  // ------------------------------------------------------------
+
+  Future<void> startEmergency() async {
+    await getCurrentLocation();
+
+    setState(() {
+      emergencyActive = true;
+      greenCorridor = true;
+      incidentDetected = false;
+      trafficStatus = 'Moderate';
+      selectedRoute = 'AI Recommended Route';
+      eta = 12;
+    });
+
+    startEtaTimer();
+
+    showEmergencyDialog();
+  }
+
+  // ------------------------------------------------------------
+  // ETA TIMER
+  // ------------------------------------------------------------
+
+  void startEtaTimer() {
+    etaTimer?.cancel();
+
+    etaTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (timer) {
+        if (!emergencyActive) {
+          timer.cancel();
+          return;
+        }
+
+        if (eta > 1) {
+          setState(() {
+            eta--;
+          });
+        }
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
+  // SIMULATE TRAFFIC INCIDENT
+  // ------------------------------------------------------------
+
+  void simulateIncident() {
+    if (!emergencyActive) {
+      showMessage(
+        'Start an emergency trip first.',
+      );
+      return;
+    }
+
+    setState(() {
+      incidentDetected = true;
+      greenCorridor = false;
+      trafficStatus = 'High';
+    });
+
+    showMessage(
+      'Traffic incident detected at Junction 2.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // AI REROUTING
+  // ------------------------------------------------------------
+
+  void recalculateRoute() {
+    if (!incidentDetected) {
+      showMessage(
+        'No incident detected. Current route is optimal.',
+      );
+      return;
+    }
+
+    setState(() {
+      selectedRoute = 'Alternative AI Route';
+      trafficStatus = 'Low';
+      greenCorridor = true;
+      incidentDetected = false;
+      eta = 14;
+    });
+
+    showMessage(
+      'AI selected an alternative route.',
+    );
+
+    startEtaTimer();
+  }
+
+  // ------------------------------------------------------------
+  // END EMERGENCY
+  // ------------------------------------------------------------
+
+  void completeEmergency() {
+    etaTimer?.cancel();
+
+    setState(() {
+      emergencyActive = false;
+      greenCorridor = false;
+      incidentDetected = false;
+      selectedRoute = 'No active route';
+      trafficStatus = 'Normal';
+      eta = 0;
+    });
+
+    showMessage(
+      'Ambulance reached the hospital.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // EMERGENCY DIALOG
+  // ------------------------------------------------------------
+
+  void showEmergencyDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(
+                Icons.emergency,
+                color: Colors.red,
+              ),
+              SizedBox(width: 10),
+              Text('Emergency Activated'),
+            ],
+          ),
+          content: Text(
+            'Destination: $selectedHospital\n\n'
+            'AI is calculating the fastest route.\n\n'
+            'Green corridor request has been sent.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
+  // MESSAGE
+  // ------------------------------------------------------------
+
+  void showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration:
+            const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // UI
+  // ------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Row(
+          children: [
+            Icon(
+              Icons.local_hospital,
+              color: Colors.red,
+            ),
+            SizedBox(width: 8),
+            Text(
+              'LifeLane AI',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            onPressed: getCurrentLocation,
+            icon: const Icon(
+              Icons.my_location,
+            ),
+            tooltip: 'Get GPS',
+          ),
+        ],
+      ),
+
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+
+              // DRIVER CARD
+              driverCard(),
+
+              const SizedBox(height: 15),
+
+              // EMERGENCY BUTTON
+              emergencyButton(),
+
+              const SizedBox(height: 20),
+
+              // MAP
+              mapSection(),
+
+              const SizedBox(height: 20),
+
+              // STATUS
+              statusSection(),
+
+              const SizedBox(height: 20),
+
+              // HOSPITAL
+              hospitalSection(),
+
+              const SizedBox(height: 20),
+
+              // ACTION BUTTONS
+              actionButtons(),
+
+              const SizedBox(height: 20),
+
+              // GPS
+              gpsSection(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // DRIVER CARD
+  // ------------------------------------------------------------
+
+  Widget driverCard() {
+    return Card(
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+
+            const CircleAvatar(
+              radius: 30,
+              child: Icon(
+                Icons.person,
+                size: 35,
+              ),
+            ),
+
+            const SizedBox(width: 15),
+
+            const Expanded(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Ambulance Driver',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text('Ambulance ID: AMB-102'),
+                  Text('Driver Status: ONLINE'),
+                ],
+              ),
+            ),
+
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 6,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.green,
+                borderRadius:
+                    BorderRadius.circular(20),
+              ),
+              child: const Text(
+                'ONLINE',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight:
+                      FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // EMERGENCY BUTTON
+  // ------------------------------------------------------------
+
+  Widget emergencyButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 65,
+      child: ElevatedButton.icon(
+        onPressed:
+            emergencyActive
+                ? null
+                : startEmergency,
+        icon: const Icon(
+          Icons.emergency,
+          size: 32,
+        ),
+        label: Text(
+          emergencyActive
+              ? 'EMERGENCY ACTIVE'
+              : 'START EMERGENCY',
+          style: const TextStyle(
+            fontSize: 19,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.red,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor:
+              Colors.red.shade300,
+          disabledForegroundColor:
+              Colors.white,
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // MAP SECTION
+  // ------------------------------------------------------------
+
+  Widget mapSection() {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        const Text(
+          'Live Route',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        Container(
+          height: 260,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            borderRadius:
+                BorderRadius.circular(16),
+          ),
+          child: Stack(
+            children: [
+
+              const Center(
+                child: Icon(
+                  Icons.map,
+                  size: 100,
+                  color: Colors.grey,
+                ),
+              ),
+
+              // AMBULANCE
+              const Positioned(
+                left: 45,
+                bottom: 60,
+                child: Icon(
+                  Icons.local_shipping,
+                  color: Colors.red,
+                  size: 40,
+                ),
+              ),
+
+              // HOSPITAL
+              const Positioned(
+                right: 45,
+                top: 50,
+                child: Icon(
+                  Icons.local_hospital,
+                  color: Colors.blue,
+                  size: 45,
+                ),
+              ),
+
+              // ROUTE
+              Positioned(
+                left: 85,
+                right: 85,
+                bottom: 85,
+                child: Container(
+                  height: 5,
+                  color: greenCorridor
+                      ? Colors.green
+                      : Colors.orange,
+                ),
+              ),
+
+              Positioned(
+                top: 15,
+                left: 15,
+                child: Container(
+                  padding:
+                      const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius:
+                        BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    selectedRoute,
+                    style: const TextStyle(
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // STATUS SECTION
+  // ------------------------------------------------------------
+
+  Widget statusSection() {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        const Text(
+          'Emergency Status',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        Row(
+          children: [
+
+            Expanded(
+              child: statusCard(
+                'ETA',
+                emergencyActive
+                    ? '$eta min'
+                    : '--',
+                Icons.timer,
+                Colors.blue,
+              ),
+            ),
+
+            const SizedBox(width: 10),
+
+            Expanded(
+              child: statusCard(
+                'Traffic',
+                trafficStatus,
+                Icons.traffic,
+                Colors.orange,
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        Card(
+          child: ListTile(
+            leading: Icon(
+              greenCorridor
+                  ? Icons.check_circle
+                  : Icons.cancel,
+              color: greenCorridor
+                  ? Colors.green
+                  : Colors.red,
+              size: 32,
+            ),
+            title: const Text(
+              'Green Corridor',
+              style: TextStyle(
+                fontWeight:
+                    FontWeight.bold,
+              ),
+            ),
+            subtitle: Text(
+              greenCorridor
+                  ? 'Traffic signals prioritized for ambulance'
+                  : 'Green corridor inactive',
+            ),
+          ),
+        ),
+
+        if (incidentDetected) ...[
+          const SizedBox(height: 10),
+
+          Card(
+            color: Colors.orange.shade100,
+            child: ListTile(
+              leading: const Icon(
+                Icons.warning,
+                color: Colors.orange,
+              ),
+              title: const Text(
+                'Traffic Incident Detected',
+                style: TextStyle(
+                  fontWeight:
+                      FontWeight.bold,
+                ),
+              ),
+              subtitle: const Text(
+                'Junction 2 has congestion.',
+              ),
+              trailing: ElevatedButton(
+                onPressed:
+                    recalculateRoute,
+                child:
+                    const Text('REROUTE'),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget statusCard(
+    String title,
+    String value,
+    IconData icon,
+    Color iconColor,
+  ) {
+    return Card(
+      child: Padding(
+        padding:
+            const EdgeInsets.all(15),
+        child: Column(
+          children: [
+
+            Icon(
+              icon,
+              color: iconColor,
+              size: 32,
+            ),
+
+            const SizedBox(height: 5),
+
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.grey,
+              ),
+            ),
+
+            const SizedBox(height: 5),
+
+            Text(
+              value,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight:
+                    FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // HOSPITAL SECTION
+  // ------------------------------------------------------------
+
+  Widget hospitalSection() {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        const Text(
+          'Destination Hospital',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        DropdownButtonFormField<String>(
+          value: selectedHospital,
+
+          decoration:
+              const InputDecoration(
+            border:
+                OutlineInputBorder(),
+            prefixIcon:
+                Icon(
+              Icons.local_hospital,
+              color: Colors.red,
+            ),
+          ),
+
+          items: hospitals.map(
+            (hospital) {
+              return DropdownMenuItem(
+                value: hospital,
+                child: Text(hospital),
+              );
+            },
+          ).toList(),
+
+          onChanged: emergencyActive
+              ? null
+              : (value) {
+                  if (value == null) return;
+
+                  setState(() {
+                    selectedHospital =
+                        value;
+                  });
+                },
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // ACTION BUTTONS
+  // ------------------------------------------------------------
+
+  Widget actionButtons() {
+    return Column(
+      children: [
+
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed:
+                emergencyActive
+                    ? simulateIncident
+                    : null,
+            icon: const Icon(
+              Icons.warning,
+            ),
+            label: const Text(
+              'SIMULATE TRAFFIC INCIDENT',
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed:
+                incidentDetected
+                    ? recalculateRoute
+                    : null,
+            icon: const Icon(
+              Icons.route,
+            ),
+            label: const Text(
+              'AI RECALCULATE ROUTE',
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        if (emergencyActive)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed:
+                  completeEmergency,
+              icon: const Icon(
+                Icons.check_circle,
+              ),
+              label: const Text(
+                'ARRIVED AT HOSPITAL',
+              ),
+              style:
+                  ElevatedButton.styleFrom(
+                backgroundColor:
+                    Colors.green,
+                foregroundColor:
+                    Colors.white,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // GPS SECTION
+  // ------------------------------------------------------------
+
+  Widget gpsSection() {
+    return Card(
+      child: ListTile(
+        leading: Icon(
+          locationLoading
+              ? Icons.gps_not_fixed
+              : Icons.gps_fixed,
+          color: Colors.red,
+        ),
+
+        title: const Text(
+          'GPS Location',
+          style: TextStyle(
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        subtitle: Text(
+          latitude == null
+              ? 'Location not loaded'
+              : 'Lat: ${latitude!.toStringAsFixed(5)}\n'
+                'Lng: ${longitude!.toStringAsFixed(5)}',
+        ),
+
+        trailing: IconButton(
+          onPressed:
+              locationLoading
+                  ? null
+                  : getCurrentLocation,
+          icon: const Icon(
+            Icons.refresh,
+          ),
+        ),
+      ),
+    );
+  }
+}
