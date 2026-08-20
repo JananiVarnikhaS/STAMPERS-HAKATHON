@@ -1,0 +1,1392 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const LifeLaneAdminApp());
+}
+
+class LifeLaneAdminApp extends StatelessWidget {
+  const LifeLaneAdminApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'LifeLane AI - Traffic Admin',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.red,
+      ),
+      home: const TrafficAdminDashboard(),
+    );
+  }
+}
+
+class TrafficAdminDashboard extends StatefulWidget {
+  const TrafficAdminDashboard({super.key});
+
+  @override
+  State<TrafficAdminDashboard> createState() =>
+      _TrafficAdminDashboardState();
+}
+
+class _TrafficAdminDashboardState
+    extends State<TrafficAdminDashboard> {
+
+  // ------------------------------------------------------------
+  // SYSTEM VARIABLES
+  // ------------------------------------------------------------
+
+  bool systemOnline = true;
+  bool greenCorridorActive = true;
+  bool incidentDetected = false;
+
+  String selectedAmbulance = 'AMB-102';
+
+  String routeRecommendation =
+      'Primary Route';
+
+  String trafficLevel = 'Moderate';
+
+  int activeEmergencies = 2;
+  int activeAmbulances = 3;
+  int controlledJunctions = 8;
+
+  Timer? timer;
+
+  // Junction status
+  List<Map<String, dynamic>> junctions = [
+    {
+      'name': 'Junction 1',
+      'traffic': 'Low',
+      'signal': 'Normal',
+      'ambulance': false,
+    },
+    {
+      'name': 'Junction 2',
+      'traffic': 'High',
+      'signal': 'Priority',
+      'ambulance': true,
+    },
+    {
+      'name': 'Junction 3',
+      'traffic': 'Medium',
+      'signal': 'Normal',
+      'ambulance': false,
+    },
+    {
+      'name': 'Junction 4',
+      'traffic': 'Low',
+      'signal': 'Normal',
+      'ambulance': false,
+    },
+  ];
+
+  // Ambulance data
+  List<Map<String, dynamic>> ambulances = [
+    {
+      'id': 'AMB-102',
+      'status': 'Emergency',
+      'eta': 12,
+      'traffic': 'Moderate',
+      'route': 'Primary Route',
+    },
+    {
+      'id': 'AMB-205',
+      'status': 'Emergency',
+      'eta': 8,
+      'traffic': 'Low',
+      'route': 'Alternative Route',
+    },
+    {
+      'id': 'AMB-301',
+      'status': 'Available',
+      'eta': 0,
+      'traffic': 'Normal',
+      'route': 'No Active Route',
+    },
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+
+    timer = Timer.periodic(
+      const Duration(seconds: 10),
+      (timer) {
+        updateDashboard();
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  // ------------------------------------------------------------
+  // UPDATE DASHBOARD
+  // ------------------------------------------------------------
+
+  void updateDashboard() {
+    if (!mounted) return;
+
+    setState(() {
+      for (var ambulance in ambulances) {
+        if (ambulance['status'] == 'Emergency' &&
+            ambulance['eta'] > 1) {
+          ambulance['eta']--;
+        }
+      }
+    });
+  }
+
+  // ------------------------------------------------------------
+  // ACTIVATE GREEN CORRIDOR
+  // ------------------------------------------------------------
+
+  void activateGreenCorridor() {
+    setState(() {
+      greenCorridorActive = true;
+
+      for (var junction in junctions) {
+        if (junction['ambulance'] == true) {
+          junction['signal'] = 'Priority';
+        }
+      }
+    });
+
+    showMessage(
+      'Green corridor activated for emergency vehicles.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // DISABLE GREEN CORRIDOR
+  // ------------------------------------------------------------
+
+  void disableGreenCorridor() {
+    setState(() {
+      greenCorridorActive = false;
+
+      for (var junction in junctions) {
+        if (junction['signal'] == 'Priority') {
+          junction['signal'] = 'Normal';
+        }
+      }
+    });
+
+    showMessage(
+      'Green corridor deactivated.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // DETECT INCIDENT
+  // ------------------------------------------------------------
+
+  void detectIncident() {
+    setState(() {
+      incidentDetected = true;
+      trafficLevel = 'High';
+
+      junctions[1]['traffic'] = 'Critical';
+      junctions[1]['signal'] = 'Incident';
+
+      routeRecommendation =
+          'Alternative Route';
+    });
+
+    showMessage(
+      'Traffic incident detected at Junction 2.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // CLEAR INCIDENT
+  // ------------------------------------------------------------
+
+  void clearIncident() {
+    setState(() {
+      incidentDetected = false;
+      trafficLevel = 'Moderate';
+
+      junctions[1]['traffic'] = 'High';
+      junctions[1]['signal'] =
+          greenCorridorActive
+              ? 'Priority'
+              : 'Normal';
+
+      routeRecommendation =
+          'Primary Route';
+    });
+
+    showMessage(
+      'Traffic incident cleared.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // AI ROUTE ANALYSIS
+  // ------------------------------------------------------------
+
+  void runAIAnalysis() {
+    setState(() {
+      if (incidentDetected) {
+        routeRecommendation =
+            'Alternative Route';
+      } else if (trafficLevel == 'High') {
+        routeRecommendation =
+            'Alternative Route';
+      } else {
+        routeRecommendation =
+            'Primary Route';
+      }
+    });
+
+    showMessage(
+      'AI route analysis completed.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // PRIORITIZE AMBULANCE
+  // ------------------------------------------------------------
+
+  void prioritizeAmbulance(String ambulanceId) {
+    setState(() {
+      selectedAmbulance = ambulanceId;
+
+      for (var ambulance in ambulances) {
+        if (ambulance['id'] == ambulanceId) {
+          ambulance['status'] = 'Emergency';
+        }
+      }
+
+      for (var junction in junctions) {
+        if (junction['name'] == 'Junction 2') {
+          junction['ambulance'] = true;
+          junction['signal'] = 'Priority';
+        }
+      }
+
+      greenCorridorActive = true;
+    });
+
+    showMessage(
+      '$ambulanceId has been prioritized.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // SIMULATE EMERGENCY
+  // ------------------------------------------------------------
+
+  void simulateEmergency() {
+    setState(() {
+      activeEmergencies++;
+
+      ambulances.add({
+        'id': 'AMB-${400 + activeEmergencies}',
+        'status': 'Emergency',
+        'eta': 15,
+        'traffic': 'Moderate',
+        'route': 'AI Route',
+      });
+
+      activeAmbulances++;
+
+      junctions[1]['ambulance'] = true;
+      junctions[1]['signal'] = 'Priority';
+
+      greenCorridorActive = true;
+    });
+
+    showMessage(
+      'New ambulance emergency request received.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // MESSAGE
+  // ------------------------------------------------------------
+
+  void showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration:
+            const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // MAIN UI
+  // ------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Row(
+          children: [
+            Icon(
+              Icons.traffic,
+              color: Colors.red,
+            ),
+            SizedBox(width: 8),
+            Text(
+              'LifeLane AI Admin',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            onPressed: () {
+              setState(() {
+                systemOnline = !systemOnline;
+              });
+
+              showMessage(
+                systemOnline
+                    ? 'System is online.'
+                    : 'System is offline.',
+              );
+            },
+            icon: Icon(
+              systemOnline
+                  ? Icons.cloud_done
+                  : Icons.cloud_off,
+            ),
+          ),
+        ],
+      ),
+
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+
+              systemHeader(),
+
+              const SizedBox(height: 20),
+
+              statisticsSection(),
+
+              const SizedBox(height: 20),
+
+              emergencySection(),
+
+              const SizedBox(height: 20),
+
+              liveTrafficMap(),
+
+              const SizedBox(height: 20),
+
+              trafficOverview(),
+
+              const SizedBox(height: 20),
+
+              junctionSection(),
+
+              const SizedBox(height: 20),
+
+              ambulanceSection(),
+
+              const SizedBox(height: 20),
+
+              aiRouteSection(),
+
+              const SizedBox(height: 20),
+
+              incidentSection(),
+
+              const SizedBox(height: 20),
+
+              greenCorridorSection(),
+
+              const SizedBox(height: 20),
+
+              demoSection(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // SYSTEM HEADER
+  // ------------------------------------------------------------
+
+  Widget systemHeader() {
+    return Card(
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+
+            const CircleAvatar(
+              radius: 32,
+              child: Icon(
+                Icons.admin_panel_settings,
+                size: 38,
+              ),
+            ),
+
+            const SizedBox(width: 15),
+
+            const Expanded(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Traffic Control Center',
+                    style: TextStyle(
+                      fontSize: 21,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 5),
+                  Text(
+                    'LifeLane AI Emergency Management',
+                  ),
+                ],
+              ),
+            ),
+
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 6,
+              ),
+              decoration: BoxDecoration(
+                color: systemOnline
+                    ? Colors.green
+                    : Colors.red,
+                borderRadius:
+                    BorderRadius.circular(20),
+              ),
+              child: Text(
+                systemOnline
+                    ? 'ONLINE'
+                    : 'OFFLINE',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight:
+                      FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // STATISTICS
+  // ------------------------------------------------------------
+
+  Widget statisticsSection() {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        const Text(
+          'System Overview',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        Row(
+          children: [
+
+            Expanded(
+              child: statisticCard(
+                'Emergency',
+                '$activeEmergencies',
+                Icons.emergency,
+                Colors.red,
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
+            Expanded(
+              child: statisticCard(
+                'Ambulances',
+                '$activeAmbulances',
+                Icons.local_shipping,
+                Colors.blue,
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
+            Expanded(
+              child: statisticCard(
+                'Junctions',
+                '$controlledJunctions',
+                Icons.traffic,
+                Colors.orange,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget statisticCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+
+            Icon(
+              icon,
+              color: color,
+              size: 30,
+            ),
+
+            const SizedBox(height: 5),
+
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight:
+                    FontWeight.bold,
+              ),
+            ),
+
+            Text(
+              title,
+              textAlign:
+                  TextAlign.center,
+              style: const TextStyle(
+                color: Colors.grey,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // EMERGENCY SECTION
+  // ------------------------------------------------------------
+
+  Widget emergencySection() {
+    return Card(
+      color: Colors.red.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+
+            const Icon(
+              Icons.warning_amber,
+              color: Colors.red,
+              size: 40,
+            ),
+
+            const SizedBox(width: 15),
+
+            const Expanded(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'ACTIVE EMERGENCY',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontSize: 18,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 5),
+                  Text(
+                    'Emergency vehicles are being monitored.',
+                  ),
+                ],
+              ),
+            ),
+
+            Text(
+              '$activeEmergencies',
+              style: const TextStyle(
+                fontSize: 28,
+                fontWeight:
+                    FontWeight.bold,
+                color: Colors.red,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // LIVE TRAFFIC MAP
+  // ------------------------------------------------------------
+
+  Widget liveTrafficMap() {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        const Text(
+          'Live Traffic & Ambulance Map',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        Container(
+          height: 300,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            borderRadius:
+                BorderRadius.circular(16),
+          ),
+          child: Stack(
+            children: [
+
+              const Center(
+                child: Icon(
+                  Icons.map,
+                  size: 110,
+                  color: Colors.grey,
+                ),
+              ),
+
+              // Junction 1
+              Positioned(
+                left: 40,
+                top: 50,
+                child: junctionMarker(
+                  'J1',
+                  Colors.green,
+                ),
+              ),
+
+              // Junction 2
+              Positioned(
+                left: 170,
+                top: 120,
+                child: junctionMarker(
+                  'J2',
+                  incidentDetected
+                      ? Colors.red
+                      : Colors.orange,
+                ),
+              ),
+
+              // Junction 3
+              Positioned(
+                right: 50,
+                top: 70,
+                child: junctionMarker(
+                  'J3',
+                  Colors.orange,
+                ),
+              ),
+
+              // Junction 4
+              Positioned(
+                right: 80,
+                bottom: 45,
+                child: junctionMarker(
+                  'J4',
+                  Colors.green,
+                ),
+              ),
+
+              // Ambulance
+              const Positioned(
+                left: 145,
+                bottom: 35,
+                child: Icon(
+                  Icons.local_shipping,
+                  color: Colors.red,
+                  size: 42,
+                ),
+              ),
+
+              // Hospital
+              const Positioned(
+                right: 25,
+                bottom: 20,
+                child: Icon(
+                  Icons.local_hospital,
+                  color: Colors.blue,
+                  size: 45,
+                ),
+              ),
+
+              Positioned(
+                top: 15,
+                left: 15,
+                child: Container(
+                  padding:
+                      const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius:
+                        BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'Traffic: $trafficLevel',
+                    style: const TextStyle(
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget junctionMarker(
+    String name,
+    Color color,
+  ) {
+    return Column(
+      children: [
+        Icon(
+          Icons.location_on,
+          color: color,
+          size: 35,
+        ),
+        Text(
+          name,
+          style: const TextStyle(
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // TRAFFIC OVERVIEW
+  // ------------------------------------------------------------
+
+  Widget trafficOverview() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+
+            const Text(
+              'Traffic Overview',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight:
+                    FontWeight.bold,
+              ),
+            ),
+
+            const SizedBox(height: 15),
+
+            trafficBar(
+              'Low Traffic',
+              0.35,
+              Colors.green,
+            ),
+
+            const SizedBox(height: 12),
+
+            trafficBar(
+              'Medium Traffic',
+              0.55,
+              Colors.orange,
+            ),
+
+            const SizedBox(height: 12),
+
+            trafficBar(
+              'High Traffic',
+              incidentDetected
+                  ? 0.85
+                  : 0.45,
+              Colors.red,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget trafficBar(
+    String title,
+    double value,
+    Color color,
+  ) {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        Row(
+          mainAxisAlignment:
+              MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title),
+            Text(
+              '${(value * 100).toInt()}%',
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 5),
+
+        LinearProgressIndicator(
+          value: value,
+          color: color,
+          minHeight: 8,
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // JUNCTION SECTION
+  // ------------------------------------------------------------
+
+  Widget junctionSection() {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        const Text(
+          'Junction Status',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        ...junctions.map(
+          (junction) {
+            return Card(
+              child: ListTile(
+
+                leading: Icon(
+                  Icons.traffic,
+                  color: getTrafficColor(
+                    junction['traffic'],
+                  ),
+                  size: 32,
+                ),
+
+                title: Text(
+                  junction['name'],
+                  style: const TextStyle(
+                    fontWeight:
+                        FontWeight.bold,
+                  ),
+                ),
+
+                subtitle: Text(
+                  'Traffic: ${junction['traffic']}',
+                ),
+
+                trailing: Container(
+                  padding:
+                      const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration:
+                      BoxDecoration(
+                    color: getSignalColor(
+                      junction['signal'],
+                    ),
+                    borderRadius:
+                        BorderRadius.circular(
+                            20),
+                  ),
+                  child: Text(
+                    junction['signal'],
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight:
+                          FontWeight.bold,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Color getTrafficColor(String traffic) {
+    switch (traffic) {
+      case 'Low':
+        return Colors.green;
+
+      case 'Medium':
+        return Colors.orange;
+
+      case 'High':
+        return Colors.deepOrange;
+
+      case 'Critical':
+        return Colors.red;
+
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Color getSignalColor(String signal) {
+    switch (signal) {
+      case 'Priority':
+        return Colors.green;
+
+      case 'Incident':
+        return Colors.red;
+
+      case 'Normal':
+        return Colors.blue;
+
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // ------------------------------------------------------------
+  // AMBULANCE SECTION
+  // ------------------------------------------------------------
+
+  Widget ambulanceSection() {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        const Text(
+          'Live Ambulances',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        ...ambulances.map(
+          (ambulance) {
+            return Card(
+              child: ListTile(
+
+                leading: const Icon(
+                  Icons.local_shipping,
+                  color: Colors.red,
+                  size: 35,
+                ),
+
+                title: Text(
+                  ambulance['id'],
+                  style: const TextStyle(
+                    fontWeight:
+                        FontWeight.bold,
+                  ),
+                ),
+
+                subtitle: Text(
+                  '${ambulance['status']} • '
+                  'ETA: ${ambulance['eta']} min\n'
+                  '${ambulance['route']}',
+                ),
+
+                isThreeLine: true,
+
+                trailing: ElevatedButton(
+                  onPressed: () {
+                    prioritizeAmbulance(
+                      ambulance['id'],
+                    );
+                  },
+                  child:
+                      const Text('PRIORITY'),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // AI ROUTE SECTION
+  // ------------------------------------------------------------
+
+  Widget aiRouteSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+
+            const Row(
+              children: [
+                Icon(
+                  Icons.psychology,
+                  color: Colors.purple,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'AI Route Recommendation',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight:
+                        FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 15),
+
+            Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.all(15),
+              decoration: BoxDecoration(
+                color: Colors.purple.shade50,
+                borderRadius:
+                    BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+
+                  const Text(
+                    'Recommended Route',
+                    style: TextStyle(
+                      color: Colors.grey,
+                    ),
+                  ),
+
+                  const SizedBox(height: 5),
+
+                  Text(
+                    routeRecommendation,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  Text(
+                    incidentDetected
+                        ? 'Primary route has congestion. Alternative route recommended.'
+                        : 'Current route provides the best emergency response path.',
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 15),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed:
+                    runAIAnalysis,
+                icon: const Icon(
+                  Icons.psychology,
+                ),
+                label: const Text(
+                  'RUN AI ROUTE ANALYSIS',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // INCIDENT SECTION
+  // ------------------------------------------------------------
+
+  Widget incidentSection() {
+    return Card(
+      color: incidentDetected
+          ? Colors.red.shade50
+          : null,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+
+            Row(
+              children: [
+
+                Icon(
+                  incidentDetected
+                      ? Icons.warning
+                      : Icons.check_circle,
+                  color: incidentDetected
+                      ? Colors.red
+                      : Colors.green,
+                  size: 30,
+                ),
+
+                const SizedBox(width: 10),
+
+                Text(
+                  incidentDetected
+                      ? 'INCIDENT DETECTED'
+                      : 'No Active Incident',
+                  style: TextStyle(
+                    fontSize: 19,
+                    fontWeight:
+                        FontWeight.bold,
+                    color: incidentDetected
+                        ? Colors.red
+                        : Colors.green,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            Text(
+              incidentDetected
+                  ? 'Junction 2 has critical congestion. Rerouting emergency vehicles is recommended.'
+                  : 'Traffic monitoring system is operating normally.',
+            ),
+
+            const SizedBox(height: 15),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed:
+                    incidentDetected
+                        ? clearIncident
+                        : detectIncident,
+                icon: Icon(
+                  incidentDetected
+                      ? Icons.clear
+                      : Icons.warning,
+                ),
+                label: Text(
+                  incidentDetected
+                      ? 'CLEAR INCIDENT'
+                      : 'SIMULATE INCIDENT',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // GREEN CORRIDOR SECTION
+  // ------------------------------------------------------------
+
+  Widget greenCorridorSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+
+            const Text(
+              'Green Corridor Control',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight:
+                    FontWeight.bold,
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            ListTile(
+              contentPadding:
+                  EdgeInsets.zero,
+
+              leading: Icon(
+                greenCorridorActive
+                    ? Icons.check_circle
+                    : Icons.cancel,
+                color:
+                    greenCorridorActive
+                        ? Colors.green
+                        : Colors.red,
+                size: 32,
+              ),
+
+              title: Text(
+                greenCorridorActive
+                    ? 'Green Corridor ACTIVE'
+                    : 'Green Corridor INACTIVE',
+                style: const TextStyle(
+                  fontWeight:
+                      FontWeight.bold,
+                ),
+              ),
+
+              subtitle: Text(
+                greenCorridorActive
+                    ? 'Emergency traffic priority is enabled.'
+                    : 'Normal traffic signal operation.',
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            Row(
+              children: [
+
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed:
+                        activateGreenCorridor,
+                    child:
+                        const Text('ACTIVATE'),
+                  ),
+                ),
+
+                const SizedBox(width: 10),
+
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed:
+                        disableGreenCorridor,
+                    child:
+                        const Text('DISABLE'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // DEMO SECTION
+  // ------------------------------------------------------------
+
+  Widget demoSection() {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+
+        const Text(
+          'Hackathon Demo Controls',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed:
+                simulateEmergency,
+            icon: const Icon(
+              Icons.add_alert,
+            ),
+            label: const Text(
+              'SIMULATE NEW EMERGENCY',
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        const Text(
+          'Use these controls to demonstrate emergency detection, traffic management, AI rerouting and green corridor activation.',
+          style: TextStyle(
+            color: Colors.grey,
+          ),
+        ),
+      ],
+    );
+  }
+}
