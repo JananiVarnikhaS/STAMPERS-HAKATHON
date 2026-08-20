@@ -1,0 +1,1185 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const LifeLaneHospitalApp());
+}
+
+class LifeLaneHospitalApp extends StatelessWidget {
+  const LifeLaneHospitalApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'LifeLane AI - Hospital',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.red,
+      ),
+      home: const HospitalDashboard(),
+    );
+  }
+}
+
+class HospitalDashboard extends StatefulWidget {
+  const HospitalDashboard({super.key});
+
+  @override
+  State<HospitalDashboard> createState() =>
+      _HospitalDashboardState();
+}
+
+class _HospitalDashboardState
+    extends State<HospitalDashboard> {
+
+  bool ambulanceIncoming = true;
+  bool traumaTeamReady = false;
+  bool emergencyRoomReady = false;
+  bool doctorNotified = false;
+
+  String ambulanceId = 'AMB-102';
+  String patientName = 'Emergency Patient';
+  String emergencyType = 'Road Accident';
+
+  String ambulanceStatus = 'En Route';
+  String trafficStatus = 'Moderate';
+  String routeStatus = 'AI Optimized Route';
+
+  int eta = 12;
+
+  double ambulanceProgress = 0.45;
+
+  Timer? timer;
+
+  @override
+  void initState() {
+    super.initState();
+    startEtaTimer();
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  // ------------------------------------------------------------
+  // ETA TIMER
+  // ------------------------------------------------------------
+
+  void startEtaTimer() {
+    timer = Timer.periodic(
+      const Duration(seconds: 10),
+      (timer) {
+
+        if (!ambulanceIncoming) {
+          timer.cancel();
+          return;
+        }
+
+        if (eta > 1) {
+          setState(() {
+            eta--;
+            ambulanceProgress += 0.03;
+
+            if (ambulanceProgress > 1) {
+              ambulanceProgress = 1;
+            }
+          });
+        } else {
+          setState(() {
+            eta = 0;
+            ambulanceStatus = 'Arrived';
+            ambulanceIncoming = false;
+            ambulanceProgress = 1;
+          });
+
+          timer.cancel();
+
+          showMessage(
+            'Ambulance has arrived at the hospital.',
+          );
+        }
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
+  // SIMULATE NEW AMBULANCE
+  // ------------------------------------------------------------
+
+  void simulateNewAmbulance() {
+
+    setState(() {
+      ambulanceIncoming = true;
+      ambulanceId = 'AMB-205';
+      patientName = 'Emergency Patient';
+      emergencyType = 'Critical Injury';
+      ambulanceStatus = 'En Route';
+      trafficStatus = 'High';
+      routeStatus = 'AI Optimized Route';
+      eta = 15;
+      ambulanceProgress = 0.25;
+    });
+
+    timer?.cancel();
+    startEtaTimer();
+
+    showMessage(
+      'New ambulance emergency received.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // PREPARE HOSPITAL
+  // ------------------------------------------------------------
+
+  void prepareHospital() {
+
+    setState(() {
+      traumaTeamReady = true;
+      emergencyRoomReady = true;
+      doctorNotified = true;
+    });
+
+    showMessage(
+      'Emergency team has been notified.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // MARK ARRIVED
+  // ------------------------------------------------------------
+
+  void markArrived() {
+
+    timer?.cancel();
+
+    setState(() {
+      ambulanceStatus = 'Arrived';
+      ambulanceIncoming = false;
+      eta = 0;
+      ambulanceProgress = 1;
+    });
+
+    showMessage(
+      'Ambulance marked as arrived.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // NOTIFY DOCTOR
+  // ------------------------------------------------------------
+
+  void notifyDoctor() {
+
+    setState(() {
+      doctorNotified = true;
+    });
+
+    showMessage(
+      'Doctor has been notified.',
+    );
+  }
+
+  // ------------------------------------------------------------
+  // MESSAGE
+  // ------------------------------------------------------------
+
+  void showMessage(String message) {
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration:
+            const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // MAIN UI
+  // ------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+
+    return Scaffold(
+
+      appBar: AppBar(
+
+        title: const Row(
+          children: [
+
+            Icon(
+              Icons.local_hospital,
+              color: Colors.red,
+            ),
+
+            SizedBox(width: 8),
+
+            Text(
+              'LifeLane AI',
+              style: TextStyle(
+                fontWeight:
+                    FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+
+        actions: [
+
+          IconButton(
+            onPressed: () {
+              showMessage(
+                'Hospital system is online.',
+              );
+            },
+            icon: const Icon(
+              Icons.notifications,
+            ),
+          ),
+
+          IconButton(
+            onPressed: () {
+              showMessage(
+                'Hospital admin settings.',
+              );
+            },
+            icon: const Icon(
+              Icons.settings,
+            ),
+          ),
+        ],
+      ),
+
+      body: SafeArea(
+
+        child: SingleChildScrollView(
+
+          padding:
+              const EdgeInsets.all(16),
+
+          child: Column(
+
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+
+            children: [
+
+              hospitalHeader(),
+
+              const SizedBox(height: 20),
+
+              emergencyAlert(),
+
+              const SizedBox(height: 20),
+
+              ambulanceStatusCard(),
+
+              const SizedBox(height: 20),
+
+              etaAndTraffic(),
+
+              const SizedBox(height: 20),
+
+              liveMap(),
+
+              const SizedBox(height: 20),
+
+              patientInformation(),
+
+              const SizedBox(height: 20),
+
+              preparationStatus(),
+
+              const SizedBox(height: 20),
+
+              actionButtons(),
+
+              const SizedBox(height: 20),
+
+              simulateButton(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // HOSPITAL HEADER
+  // ------------------------------------------------------------
+
+  Widget hospitalHeader() {
+
+    return Card(
+
+      elevation: 3,
+
+      child: Padding(
+
+        padding:
+            const EdgeInsets.all(16),
+
+        child: Row(
+
+          children: [
+
+            const CircleAvatar(
+
+              radius: 32,
+
+              child: Icon(
+                Icons.local_hospital,
+                size: 38,
+              ),
+            ),
+
+            const SizedBox(width: 15),
+
+            const Expanded(
+
+              child: Column(
+
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+
+                children: [
+
+                  Text(
+                    'City General Hospital',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+
+                  SizedBox(height: 5),
+
+                  Text(
+                    'Emergency Department',
+                  ),
+
+                  Text(
+                    'System Status: Online',
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            Container(
+
+              padding:
+                  const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 6,
+              ),
+
+              decoration:
+                  BoxDecoration(
+                color: Colors.green,
+                borderRadius:
+                    BorderRadius.circular(20),
+              ),
+
+              child: const Text(
+                'ONLINE',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight:
+                      FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // EMERGENCY ALERT
+  // ------------------------------------------------------------
+
+  Widget emergencyAlert() {
+
+    return Card(
+
+      color: Colors.red.shade50,
+
+      child: Padding(
+
+        padding:
+            const EdgeInsets.all(16),
+
+        child: Row(
+
+          children: [
+
+            const Icon(
+              Icons.warning_amber,
+              color: Colors.red,
+              size: 40,
+            ),
+
+            const SizedBox(width: 15),
+
+            Expanded(
+
+              child: Column(
+
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+
+                children: [
+
+                  const Text(
+                    'INCOMING AMBULANCE',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontSize: 18,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 5),
+
+                  Text(
+                    ambulanceIncoming
+                        ? '$ambulanceId is approaching the hospital'
+                        : 'No active ambulance',
+                  ),
+                ],
+              ),
+            ),
+
+            if (ambulanceIncoming)
+              const Icon(
+                Icons.notifications_active,
+                color: Colors.red,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // AMBULANCE STATUS
+  // ------------------------------------------------------------
+
+  Widget ambulanceStatusCard() {
+
+    return Column(
+
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+
+      children: [
+
+        const Text(
+          'Ambulance Status',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        Card(
+
+          child: Padding(
+
+            padding:
+                const EdgeInsets.all(16),
+
+            child: Column(
+
+              children: [
+
+                Row(
+
+                  children: [
+
+                    const Icon(
+                      Icons.local_shipping,
+                      color: Colors.red,
+                      size: 45,
+                    ),
+
+                    const SizedBox(width: 15),
+
+                    Expanded(
+
+                      child: Column(
+
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+
+                        children: [
+
+                          Text(
+                            ambulanceId,
+                            style:
+                                const TextStyle(
+                              fontSize: 20,
+                              fontWeight:
+                                  FontWeight.bold,
+                            ),
+                          ),
+
+                          const SizedBox(height: 5),
+
+                          Text(
+                            'Status: $ambulanceStatus',
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    statusBadge(
+                      ambulanceStatus,
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
+                LinearProgressIndicator(
+                  value:
+                      ambulanceProgress,
+                  minHeight: 8,
+                ),
+
+                const SizedBox(height: 8),
+
+                Row(
+
+                  mainAxisAlignment:
+                      MainAxisAlignment.spaceBetween,
+
+                  children: [
+
+                    const Text(
+                      'Ambulance',
+                    ),
+
+                    Text(
+                      ambulanceStatus ==
+                              'Arrived'
+                          ? 'Hospital'
+                          : 'En Route',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget statusBadge(String status) {
+
+    bool arrived =
+        status == 'Arrived';
+
+    return Container(
+
+      padding:
+          const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 6,
+      ),
+
+      decoration:
+          BoxDecoration(
+        color: arrived
+            ? Colors.green
+            : Colors.orange,
+        borderRadius:
+            BorderRadius.circular(20),
+      ),
+
+      child: Text(
+        status,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight:
+              FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // ETA + TRAFFIC
+  // ------------------------------------------------------------
+
+  Widget etaAndTraffic() {
+
+    return Row(
+
+      children: [
+
+        Expanded(
+
+          child: dashboardCard(
+            'ETA',
+            ambulanceIncoming
+                ? '$eta min'
+                : 'Arrived',
+            Icons.timer,
+            Colors.blue,
+          ),
+        ),
+
+        const SizedBox(width: 10),
+
+        Expanded(
+
+          child: dashboardCard(
+            'Traffic',
+            trafficStatus,
+            Icons.traffic,
+            Colors.orange,
+          ),
+        ),
+
+        const SizedBox(width: 10),
+
+        Expanded(
+
+          child: dashboardCard(
+            'Route',
+            'AI',
+            Icons.psychology,
+            Colors.purple,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget dashboardCard(
+    String title,
+    String value,
+    IconData icon,
+    Color iconColor,
+  ) {
+
+    return Card(
+
+      child: Padding(
+
+        padding:
+            const EdgeInsets.all(12),
+
+        child: Column(
+
+          children: [
+
+            Icon(
+              icon,
+              color: iconColor,
+              size: 30,
+            ),
+
+            const SizedBox(height: 6),
+
+            Text(
+              title,
+              style:
+                  const TextStyle(
+                color: Colors.grey,
+              ),
+            ),
+
+            const SizedBox(height: 5),
+
+            Text(
+              value,
+              textAlign:
+                  TextAlign.center,
+              style:
+                  const TextStyle(
+                fontSize: 16,
+                fontWeight:
+                    FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // LIVE MAP
+  // ------------------------------------------------------------
+
+  Widget liveMap() {
+
+    return Column(
+
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+
+      children: [
+
+        const Text(
+          'Live Ambulance Location',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        Container(
+
+          height: 260,
+
+          width:
+              double.infinity,
+
+          decoration:
+              BoxDecoration(
+            color:
+                Colors.grey.shade300,
+            borderRadius:
+                BorderRadius.circular(16),
+          ),
+
+          child: Stack(
+
+            children: [
+
+              const Center(
+
+                child: Icon(
+                  Icons.map,
+                  size: 100,
+                  color: Colors.grey,
+                ),
+              ),
+
+              // AMBULANCE
+              Positioned(
+                left:
+                    40 +
+                        (200 *
+                            ambulanceProgress),
+
+                bottom: 70,
+
+                child: const Icon(
+                  Icons.local_shipping,
+                  color: Colors.red,
+                  size: 40,
+                ),
+              ),
+
+              // HOSPITAL
+              const Positioned(
+
+                right: 30,
+                top: 40,
+
+                child: Icon(
+                  Icons.local_hospital,
+                  color: Colors.blue,
+                  size: 45,
+                ),
+              ),
+
+              // ROUTE
+              Positioned(
+
+                left: 70,
+                right: 70,
+                bottom: 90,
+
+                child: Container(
+                  height: 5,
+                  color:
+                      Colors.green,
+                ),
+              ),
+
+              Positioned(
+
+                top: 15,
+                left: 15,
+
+                child: Container(
+
+                  padding:
+                      const EdgeInsets.all(10),
+
+                  decoration:
+                      BoxDecoration(
+                    color:
+                        Colors.white,
+                    borderRadius:
+                        BorderRadius.circular(
+                            10),
+                  ),
+
+                  child: Text(
+                    routeStatus,
+                    style:
+                        const TextStyle(
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // PATIENT INFORMATION
+  // ------------------------------------------------------------
+
+  Widget patientInformation() {
+
+    return Column(
+
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+
+      children: [
+
+        const Text(
+          'Emergency Information',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        Card(
+
+          child: Column(
+
+            children: [
+
+              informationRow(
+                Icons.person,
+                'Patient',
+                patientName,
+              ),
+
+              const Divider(
+                height: 1,
+              ),
+
+              informationRow(
+                Icons.emergency,
+                'Emergency Type',
+                emergencyType,
+              ),
+
+              const Divider(
+                height: 1,
+              ),
+
+              informationRow(
+                Icons.local_shipping,
+                'Ambulance',
+                ambulanceId,
+              ),
+
+              const Divider(
+                height: 1,
+              ),
+
+              informationRow(
+                Icons.route,
+                'Route',
+                routeStatus,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget informationRow(
+    IconData icon,
+    String title,
+    String value,
+  ) {
+
+    return ListTile(
+
+      leading: Icon(
+        icon,
+        color: Colors.red,
+      ),
+
+      title: Text(
+        title,
+        style:
+            const TextStyle(
+          color: Colors.grey,
+        ),
+      ),
+
+      subtitle: Text(
+        value,
+        style:
+            const TextStyle(
+          fontSize: 16,
+          fontWeight:
+              FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // PREPARATION STATUS
+  // ------------------------------------------------------------
+
+  Widget preparationStatus() {
+
+    return Column(
+
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+
+      children: [
+
+        const Text(
+          'Hospital Preparation',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        preparationTile(
+          'Trauma Team',
+          traumaTeamReady,
+          Icons.groups,
+        ),
+
+        preparationTile(
+          'Emergency Room',
+          emergencyRoomReady,
+          Icons.meeting_room,
+        ),
+
+        preparationTile(
+          'Doctor',
+          doctorNotified,
+          Icons.medical_services,
+        ),
+      ],
+    );
+  }
+
+  Widget preparationTile(
+    String title,
+    bool ready,
+    IconData icon,
+  ) {
+
+    return Card(
+
+      child: ListTile(
+
+        leading: Icon(
+          icon,
+          color: ready
+              ? Colors.green
+              : Colors.grey,
+          size: 30,
+        ),
+
+        title: Text(
+          title,
+          style:
+              const TextStyle(
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        subtitle: Text(
+          ready
+              ? 'Ready / Notified'
+              : 'Waiting',
+        ),
+
+        trailing: Icon(
+          ready
+              ? Icons.check_circle
+              : Icons.pending,
+          color: ready
+              ? Colors.green
+              : Colors.orange,
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // ACTION BUTTONS
+  // ------------------------------------------------------------
+
+  Widget actionButtons() {
+
+    return Column(
+
+      children: [
+
+        SizedBox(
+
+          width:
+              double.infinity,
+
+          child:
+              ElevatedButton.icon(
+
+            onPressed:
+                prepareHospital,
+
+            icon:
+                const Icon(
+              Icons.medical_services,
+            ),
+
+            label:
+                const Text(
+              'PREPARE EMERGENCY TEAM',
+            ),
+
+            style:
+                ElevatedButton.styleFrom(
+              backgroundColor:
+                  Colors.green,
+              foregroundColor:
+                  Colors.white,
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        SizedBox(
+
+          width:
+              double.infinity,
+
+          child:
+              OutlinedButton.icon(
+
+            onPressed:
+                notifyDoctor,
+
+            icon:
+                const Icon(
+              Icons.notifications_active,
+            ),
+
+            label:
+                const Text(
+              'NOTIFY DOCTOR',
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        SizedBox(
+
+          width:
+              double.infinity,
+
+          child:
+              ElevatedButton.icon(
+
+            onPressed:
+                ambulanceIncoming
+                    ? markArrived
+                    : null,
+
+            icon:
+                const Icon(
+              Icons.check_circle,
+            ),
+
+            label:
+                const Text(
+              'MARK AMBULANCE ARRIVED',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // SIMULATE BUTTON
+  // ------------------------------------------------------------
+
+  Widget simulateButton() {
+
+    return SizedBox(
+
+      width:
+          double.infinity,
+
+      child:
+          OutlinedButton.icon(
+
+        onPressed:
+            simulateNewAmbulance,
+
+        icon:
+            const Icon(
+          Icons.add_alert,
+        ),
+
+        label:
+            const Text(
+          'SIMULATE NEW AMBULANCE',
+        ),
+      ),
+    );
+  }
+}
